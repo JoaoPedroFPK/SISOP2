@@ -1,0 +1,28 @@
+version: '3.8'
+
+services:
+  server:
+    build: .
+    container_name: server
+    volumes:
+      - .:/app
+    command: ./server/server 8080
+    ports:
+      - "8080:8080"
+    networks:
+      - net
+
+  client:
+    build: .
+    container_name: client
+    volumes:
+      - .:/app
+    command: /bin/bash
+    stdin_open: true
+    tty: true
+    networks:
+      - net
+
+networks:
+  net:
+    driver: bridge
