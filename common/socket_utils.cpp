@@ -9,7 +9,8 @@ int create_socket() {
 }
 
 int connect_socket(int sockfd, const char* ip, int port) {
-    sockaddr_in serv_addr{};
+    sockaddr_in serv_addr;
+    memset(&serv_addr, 0, sizeof(serv_addr));
     serv_addr.sin_family = AF_INET;
     serv_addr.sin_port = htons(port);
     inet_pton(AF_INET, ip, &serv_addr.sin_addr);
@@ -17,7 +18,8 @@ int connect_socket(int sockfd, const char* ip, int port) {
 }
 
 int bind_socket(int sockfd, int port) {
-    sockaddr_in serv_addr{};
+    sockaddr_in serv_addr;
+    memset(&serv_addr, 0, sizeof(serv_addr));
     serv_addr.sin_family = AF_INET;
     serv_addr.sin_addr.s_addr = INADDR_ANY;
     serv_addr.sin_port = htons(port);
