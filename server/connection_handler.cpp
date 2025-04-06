@@ -186,6 +186,8 @@ void process_command(int sockfd, packet& pkt) {
         case CMD_UPLOAD: {
             // Extract filename from the payload
             std::string filename(pkt.payload);
+            printf("DEBUG Server: Received upload command for file: %s, size: %u bytes\n", 
+                   filename.c_str(), pkt.total_size);
             
             // Receive file data
             char* fileData = new char[pkt.total_size];
@@ -195,21 +197,29 @@ void process_command(int sockfd, packet& pkt) {
             while (bytesRead < pkt.total_size) {
                 packet dataPkt;
                 if (read(sockfd, &dataPkt, sizeof(packet)) <= 0) {
+                    printf("DEBUG Server: Error reading data packet\n");
                     break;
                 }
                 
                 if (dataPkt.type != DATA_PACKET) {
+                    printf("DEBUG Server: Received unexpected packet type: %d\n", dataPkt.type);
                     break;
                 }
                 
                 memcpy(fileData + bytesRead, dataPkt.payload, dataPkt.length);
                 bytesRead += dataPkt.length;
+                printf("DEBUG Server: Received data packet %d, progress: %zu/%u bytes (%d%%)\n", 
+                       dataPkt.seqn, bytesRead, pkt.total_size, (int)(bytesRead * 100 / pkt.total_size));
             }
+            
+            printf("DEBUG Server: Finished receiving file data, saving file\n");
             
             // Save file
             pthread_mutex_lock(&fileMutex);
             bool success = fileManager.saveFile(username, filename, fileData, bytesRead);
             pthread_mutex_unlock(&fileMutex);
+            
+            printf("DEBUG Server: File save %s\n", success ? "successful" : "failed");
             
             delete[] fileData;
             
@@ -222,6 +232,7 @@ void process_command(int sockfd, packet& pkt) {
                 strcpy(notifyPkt.payload, filename.c_str());
                 notifyPkt.length = filename.length();
                 
+                printf("DEBUG Server: Notifying other clients about file: %s\n", filename.c_str());
                 notify_clients(username, notifyPkt, sockfd);
                 
                 // Send success response
@@ -231,6 +242,7 @@ void process_command(int sockfd, packet& pkt) {
                 strcpy(response.payload, "ERROR");
                 response.length = 5;
             }
+            printf("DEBUG Server: Sending response: %s\n", response.payload);
             write(sockfd, &response, sizeof(packet));
             break;
         }

@@ -10,8 +10,8 @@ namespace fs = std::filesystem;
 
 FileManager::FileManager() {
     // Create main server directory if it doesn't exist
-    if (!fs::exists("server_files")) {
-        fs::create_directory("server_files");
+    if (!fs::exists("server/files")) {
+        fs::create_directory("server/files");
     }
 }
 
@@ -145,7 +145,7 @@ void FileManager::propagateFileChange(const std::string& username, const std::st
 }
 
 std::string FileManager::getUserDir(const std::string& username) {
-    return "server_files/sync_dir_" + username;
+    return "server/files/sync_dir_" + username;
 }
 
 std::string FileManager::getFilePath(const std::string& username, const std::string& filename) {

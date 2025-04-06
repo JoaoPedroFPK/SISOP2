@@ -266,11 +266,15 @@ bool upload_file(const std::string& filepath) {
     // Get just the filename from the path
     std::string filename = fs::path(filepath).filename().string();
     
+    printf("DEBUG: Attempting to upload file: %s\n", filepath.c_str());
+    
     // Check if file exists
     if (!fs::exists(filepath)) {
         printf("Arquivo '%s' não encontrado.\n", filepath.c_str());
         return false;
     }
+    
+    printf("DEBUG: File exists, opening...\n");
     
     // Open the file
     std::ifstream file(filepath, std::ios::binary | std::ios::ate);
@@ -283,10 +287,14 @@ bool upload_file(const std::string& filepath) {
     size_t fileSize = file.tellg();
     file.seekg(0, std::ios::beg);
     
+    printf("DEBUG: File size: %zu bytes\n", fileSize);
+    
     // Read file content
     char* fileData = new char[fileSize];
     file.read(fileData, fileSize);
     file.close();
+    
+    printf("DEBUG: File read into memory\n");
     
     // Send upload command
     packet cmd;
@@ -296,11 +304,16 @@ bool upload_file(const std::string& filepath) {
     strcpy(cmd.payload, filename.c_str());
     cmd.length = filename.length();
     
+    printf("DEBUG: Sending upload command packet for file: %s, size: %zu\n", 
+           filename.c_str(), fileSize);
+    
     if (write(server_socket, &cmd, sizeof(packet)) <= 0) {
         printf("Erro ao enviar comando de upload.\n");
         delete[] fileData;
         return false;
     }
+    
+    printf("DEBUG: Upload command sent, sending file data...\n");
     
     // Send file data in chunks
     size_t bytesSent = 0;
@@ -313,6 +326,8 @@ bool upload_file(const std::string& filepath) {
         memcpy(dataPkt.payload, fileData + bytesSent, bytesToSend);
         dataPkt.length = bytesToSend;
         
+        printf("DEBUG: Sending data packet %d, bytes: %zu\n", dataPkt.seqn, bytesToSend);
+        
         if (write(server_socket, &dataPkt, sizeof(packet)) <= 0) {
             printf("Erro ao enviar dados do arquivo.\n");
             delete[] fileData;
@@ -320,9 +335,13 @@ bool upload_file(const std::string& filepath) {
         }
         
         bytesSent += bytesToSend;
+        printf("DEBUG: Progress: %zu/%zu bytes sent (%d%%)\n", 
+               bytesSent, fileSize, (int)(bytesSent * 100 / fileSize));
     }
     
     delete[] fileData;
+    
+    printf("DEBUG: All file data sent, waiting for server response...\n");
     
     // Get server response
     packet response;
@@ -331,8 +350,29 @@ bool upload_file(const std::string& filepath) {
         return false;
     }
     
+    printf("DEBUG: Received server response: %s\n", response.payload);
+    
     if (strcmp(response.payload, "OK") == 0) {
         printf("Arquivo '%s' enviado com sucesso.\n", filename.c_str());
+        
+        // Check if file was copied to sync directory
+        std::string syncPath = sync_dir_path + "/" + filename;
+        printf("DEBUG: Checking if file was copied to sync directory: %s\n", syncPath.c_str());
+        
+        if (fs::exists(syncPath)) {
+            printf("DEBUG: File exists in sync directory\n");
+        } else {
+            printf("DEBUG: File does NOT exist in sync directory\n");
+            
+            // Try to copy the file to sync directory if it's not there
+            try {
+                fs::copy_file(filepath, syncPath, fs::copy_options::overwrite_existing);
+                printf("DEBUG: Manually copied file to sync directory\n");
+            } catch (const std::exception& e) {
+                printf("DEBUG: Error copying file to sync directory: %s\n", e.what());
+            }
+        }
+        
         return true;
     } else {
         printf("Erro ao enviar arquivo: %s\n", response.payload);

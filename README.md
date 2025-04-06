@@ -1,120 +1,151 @@
-# File Synchronization System
+# Dropbox-like Sync Application
 
-This project implements a Dropbox-like file synchronization system in C++. It allows users to synchronize files across multiple devices through a central server, with automatic synchronization of changes.
+This application implements a Dropbox-like service to allow file synchronization between devices. It provides user authentication, file upload/download capabilities, and automatic synchronization across multiple devices for the same user.
 
-## Project Overview
+## Building the Application
 
-This system allows users to:
-- Maintain synchronized files across multiple devices
-- Upload and download files to/from the server
-- Delete files from the synchronized directory
-- List files on both client and server
-- Connect with up to two devices simultaneously per user
+You can build the application in two ways: directly with Make or using Docker containers.
 
-## Project Structure
-
-- `client/`: Client-side application code
-  - `client_interface.cpp`: Command processing and user interface
-  - `sync.h/cpp`: Synchronization functionality
-- `server/`: Server-side application code
-- `common/`: Shared code between client and server
-- `tests/`: Test files for the application
-- `Dockerfile` and `docker-compose.yml`: Container configuration for easy deployment
-
-## Building the Project
-
-Use the provided Makefile to build both the client and server:
+### Building with Make
 
 ```bash
-# Build both client and server
-make
-
-# Build only the server
-make server
-
-# Build only the client
-make client
-
-# Clean build files
-make clean
+# Clean and build the application
+make clean && make
 ```
 
-## Running with Docker
+This will generate the server and client executables in their respective directories.
 
-The project can be run using Docker containers:
+### Building with Docker
 
 ```bash
-# Start the server and client containers
-docker-compose up -d
-
-# Connect to the client container to run commands
-docker exec -it client /bin/bash
+# Build the Docker containers
+docker-compose build
 ```
 
-## Usage
+## Running the Server
 
-### Server
+### Running the Server Directly
 
 ```bash
-./server/server <port>
+# Start the server on port 8000
+./server/server 8000
 ```
 
-### Client
+You should see the message: `Servidor rodando na porta 8000...`
+
+### Running the Server in Docker
 
 ```bash
-./client/client <username> <server_ip_address> <port>
+# Start the server container
+docker-compose up server
 ```
 
-### Available Commands
+## Running the Client
 
-Once connected, the following commands are available:
+### Running the Client Directly
 
-- `upload <path/filename.ext>` - Upload a file to the server
-- `download <filename.ext>` - Download a file from server to local directory
-- `delete <filename.ext>` - Remove a file from the synchronization directory
-- `list_server` - List files stored on the server
-- `list_client` - List files in the local sync directory
-- `get_sync_dir` - Initialize the synchronization directory
-- `exit` - Close connection with the server
-- `help` - Display available commands
+```bash
+# Connect client with a username to the server
+./client/client <username> <server_ip> <port>
 
-## Implementation Details
+# Example:
+./client/client testuser 127.0.0.1 8000
+```
 
-- **Communication Protocol**: The system uses TCP sockets for reliable communication
-- **Packet Structure**: Custom packet format for data transmission
-- **Concurrency**: Threaded connection handling on the server side to support multiple clients
-- **Synchronization**: Automatic file synchronization between client and server
-- **Directory Monitoring**: Watches local sync directory for changes
-- **Data Persistence**: Server stores files and restores state between sessions
+If running in the same machine, use `127.0.0.1` as the server IP. If you're using Docker, use the container's IP address or hostname.
 
-## Current Progress
+### Running the Client in Docker
 
-So far, we have implemented:
+```bash
+# Start the client container
+docker-compose up client
+```
 
-- Basic client interface for command processing
-- Command constants for improved code maintainability
-- Command parsing and handling
-- Client-side UI with help information
-- Project structure and organization
+You'll need to modify the docker-compose.yml file to set the correct username, server IP, and port.
 
-Work in progress:
-- Server-side implementation for handling multiple users
-- File synchronization mechanism
-- Directory monitoring
-- TCP socket communication implementation
-- Testing infrastructure
+## Testing the Upload Command
 
-## Requirements
+1. Start the server
+2. Start the client
+3. Create a test file (if needed): `echo "This is a test file" > test_file.txt`
+4. In the client interface, upload the file: `upload test_file.txt`
 
-- Unix/Linux operating system
-- C++11 or later compiler
-- POSIX-compliant system for socket programming
+The client should display debugging information during the upload process and confirm when the file has been successfully uploaded.
 
-## Technical Implementation
+You can verify the upload worked by:
+- Using the `list_server` command to see files on the server
+- Using the `list_client` command to see files in your local sync directory
+- Checking the `sync_dir_<username>` directory on your machine
+- Checking the `server_files/sync_dir_<username>` directory on the server
 
-The system is built using:
-- TCP sockets for client-server communication
-- Multithreading for concurrent client connections
-- Mutexes and semaphores for synchronization
-- File I/O operations for reading and writing files
-- Custom packet format for data transfer
+## Testing Other Commands
+
+### Download a File
+
+```
+download <filename>
+```
+
+This will download a copy of the file from the server to your local directory.
+
+### Delete a File
+
+```
+delete <filename>
+```
+
+This will delete the file from the sync directory and the server.
+
+### List Server Files
+
+```
+list_server
+```
+
+This shows files stored on the server for your user.
+
+### List Client Files
+
+```
+list_client
+```
+
+This shows files in your local sync directory.
+
+### Exit
+
+```
+exit
+```
+
+This closes the connection with the server.
+
+## Automated Testing
+
+You can also use the provided test scripts to automate testing:
+
+```bash
+# Run the upload test
+./upload_test.sh
+```
+
+This script will:
+1. Create a test file
+2. Start the server
+3. Run a client with commands to upload and list files
+4. Show the results, including file listings on both server and client
+5. Clean up after the test
+
+## Troubleshooting
+
+### Connection Issues
+- Make sure the server is running and accessible from the client
+- Check that you're using the correct IP address and port
+
+### Upload Problems
+- Check that the file exists in the current directory
+- Ensure the server has write permissions to its storage directory
+
+### Synchronization Issues
+- Verify that the sync_dir exists and is writeable
+- Check client logs for any errors during synchronization
