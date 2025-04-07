@@ -10,6 +10,9 @@
 #include <unordered_map>
 #include <vector>
 #include <mutex>
+#include <sys/socket.h>
+#include <netinet/tcp.h>  // For TCP_NODELAY and IPPROTO_TCP
+#include <fcntl.h>
 
 // Global FileManager instance
 static FileManager fileManager;
@@ -65,14 +68,61 @@ void* handle_client(void* arg) {
     int sockfd = (intptr_t)arg;
     printf("Cliente conectado!\n");
     
+    // Configure the socket for proper data reception
+    struct timeval timeout;
+    timeout.tv_sec = 30;  // Increase from 5 to 30 seconds
+    timeout.tv_usec = 0;
+    
+    // Set socket timeouts
+    if (setsockopt(sockfd, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout)) < 0) {
+        perror("Error setting receive timeout on server");
+    }
+    if (setsockopt(sockfd, SOL_SOCKET, SO_SNDTIMEO, &timeout, sizeof(timeout)) < 0) {
+        perror("Error setting send timeout on server");
+    }
+    
+    // Enable keep-alive
+    int keepalive = 1;
+    if (setsockopt(sockfd, SOL_SOCKET, SO_KEEPALIVE, &keepalive, sizeof(keepalive)) < 0) {
+        perror("Error setting SO_KEEPALIVE on server");
+    }
+    
+    // Set socket to blocking mode
+    int flags = fcntl(sockfd, F_GETFL, 0);
+    fcntl(sockfd, F_SETFL, flags & ~O_NONBLOCK);
+    
+    // Set TCP_NODELAY to disable Nagle's algorithm
+    int flag = 1;
+    if (setsockopt(sockfd, IPPROTO_TCP, TCP_NODELAY, &flag, sizeof(flag)) < 0) {
+        perror("Error setting TCP_NODELAY on server");
+    }
+    
     packet pkt;
+    memset(&pkt, 0, sizeof(packet)); // Clear the packet before reading
     std::string username;
     
-    // Wait for login packet first
-    if (read(sockfd, &pkt, sizeof(packet)) > 0) {
+    // Read login packet using standard read to avoid potential issues with custom read_all
+    printf("DEBUG Server: Waiting to read login packet (size=%zu bytes)...\n", sizeof(packet));
+    ssize_t direct_bytes = recv(sockfd, &pkt, sizeof(packet), MSG_WAITALL);
+    printf("DEBUG Server: Direct read returned %zd bytes\n", direct_bytes);
+    
+    if (direct_bytes > 0) {
+        printf("DEBUG Server: Received packet header - type: %d, seqn: %d, length: %d\n",
+               pkt.type, pkt.seqn, pkt.length);
+        
+        // Validate payload length
+        if (pkt.length > sizeof(pkt.payload)) {
+            printf("ERROR: Invalid payload length: %d (max: %zu)\n", pkt.length, sizeof(pkt.payload));
+            close(sockfd);
+            pthread_exit(NULL);
+        }
+        
+        // Continue processing even with partial read as long as we have the essential header
         if (pkt.type == CMD_LOGIN) {
+            // Ensure the payload is null-terminated
+            pkt.payload[pkt.length < sizeof(pkt.payload) ? pkt.length : sizeof(pkt.payload) - 1] = '\0';
             username = pkt.payload;
-            printf("Login de usuário: %s\n", username.c_str());
+            printf("Login de usuário: %s (seq: %d)\n", username.c_str(), pkt.seqn);
             
             // Register client
             register_client(username, sockfd);
@@ -82,23 +132,66 @@ void* handle_client(void* arg) {
             fileManager.initUserDirectory(username);
             pthread_mutex_unlock(&fileMutex);
             
-            // Send login confirmation
+            // Send login confirmation with SAME sequence number
             packet response;
+            memset(&response, 0, sizeof(packet)); // Clear response packet
             response.type = CMD_LOGIN;
-            response.seqn = 0;
+            response.seqn = pkt.seqn;  // Use client's sequence number
             response.total_size = 0;
             response.length = 0;
-            write(sockfd, &response, sizeof(packet));
+            
+            printf("DEBUG Server: Sending login response with seq: %d\n", response.seqn);
+            ssize_t bytes_sent = send(sockfd, &response, sizeof(packet), 0);
+            printf("DEBUG Server: Direct send returned %zd bytes\n", bytes_sent);
             
             // Process commands
-            while (read(sockfd, &pkt, sizeof(packet)) > 0) {
+            while (true) {
+                memset(&pkt, 0, sizeof(packet)); // Clear packet before reading
+                
+                // Use direct socket operations to read command packets
+                printf("DEBUG Server: Waiting for next command packet...\n");
+                errno = 0; // Clear errno before the call
+                ssize_t cmd_bytes = recv(sockfd, &pkt, sizeof(packet), MSG_WAITALL);
+                
+                if (cmd_bytes <= 0) {
+                    printf("DEBUG Server: Failed to read command packet: %s (errno=%d)\n", 
+                           strerror(errno), errno);
+                    
+                    // Check if connection is still alive
+                    int error = 0;
+                    socklen_t len = sizeof(error);
+                    if (getsockopt(sockfd, SOL_SOCKET, SO_ERROR, &error, &len) < 0 || error != 0) {
+                        printf("DEBUG Server: Socket is in error state, closing connection.\n");
+                        break;
+                    }
+                    
+                    // If it's a timeout, we can try again
+                    if (errno == EAGAIN || errno == EWOULDBLOCK) {
+                        printf("DEBUG Server: Timeout waiting for command, retrying...\n");
+                        continue;
+                    }
+                    
+                    break;
+                }
+                
+                if (cmd_bytes < sizeof(packet)) {
+                    printf("DEBUG Server: Read incomplete packet (%zd of %zu bytes)\n", 
+                           cmd_bytes, sizeof(packet));
+                    break;
+                }
+                
+                printf("DEBUG Server: Received command packet type: %d, seq: %d\n", pkt.type, pkt.seqn);
                 process_command(sockfd, pkt);
                 
                 if (pkt.type == CMD_EXIT) {
                     break;
                 }
             }
+        } else {
+            printf("ERROR: Expected login packet (type 1), but received type %d\n", pkt.type);
         }
+    } else {
+        printf("ERROR: Failed to read login packet: %s\n", strerror(errno));
     }
     
     // Unregister client on disconnect
@@ -150,7 +243,9 @@ void notify_clients(const std::string& username, const packet& pkt, int excludeS
     if (it != connectedClients.end()) {
         for (const auto& client : it->second) {
             if (client.sockfd != excludeSockfd) {
-                write(client.sockfd, &pkt, sizeof(packet));
+                printf("DEBUG Server: Notifying client on socket %d about file: %s\n", 
+                       client.sockfd, pkt.payload);
+                send(client.sockfd, &pkt, sizeof(packet), 0);
             }
         }
     }
@@ -160,9 +255,9 @@ void notify_clients(const std::string& username, const packet& pkt, int excludeS
 
 void process_command(int sockfd, packet& pkt) {
     packet response;
-    memset(&response, 0, sizeof(packet));
+    memset(&response, 0, sizeof(packet)); // Clear the response packet
     response.type = pkt.type;
-    response.seqn = pkt.seqn;
+    response.seqn = pkt.seqn;  // Important: Use the same sequence number from the request
     
     std::string username;
     // Get username from connected clients
@@ -181,6 +276,9 @@ void process_command(int sockfd, packet& pkt) {
     if (username.empty()) {
         return;
     }
+    
+    printf("DEBUG Server: Processing command type %d from user: %s, seq: %d\n", 
+           pkt.type, username.c_str(), pkt.seqn);
     
     switch (pkt.type) {
         case CMD_UPLOAD: {
@@ -242,8 +340,8 @@ void process_command(int sockfd, packet& pkt) {
                 strcpy(response.payload, "ERROR");
                 response.length = 5;
             }
-            printf("DEBUG Server: Sending response: %s\n", response.payload);
-            write(sockfd, &response, sizeof(packet));
+            printf("DEBUG Server: Sending upload response: %s with seq: %d\n", response.payload, response.seqn);
+            send(sockfd, &response, sizeof(packet), 0);
             break;
         }
         
@@ -269,20 +367,22 @@ void process_command(int sockfd, packet& pkt) {
                     response.total_size = fileSize;
                     strcpy(response.payload, "OK");
                     response.length = 2;
-                    write(sockfd, &response, sizeof(packet));
+                    printf("DEBUG Server: Sending download response: %s with seq: %d\n", response.payload, response.seqn);
+                    send(sockfd, &response, sizeof(packet), 0);
                     
                     // Send file data in chunks
                     size_t bytesSent = 0;
                     while (bytesSent < fileSize) {
                         packet dataPkt;
                         dataPkt.type = DATA_PACKET;
-                        dataPkt.seqn = bytesSent / sizeof(dataPkt.payload) + 1;
+                        // Include the original command's sequence number to help client thread identify these packets
+                        dataPkt.seqn = response.seqn; 
                         
                         size_t bytesToSend = std::min(sizeof(dataPkt.payload), fileSize - bytesSent);
                         memcpy(dataPkt.payload, fileData + bytesSent, bytesToSend);
                         dataPkt.length = bytesToSend;
                         
-                        write(sockfd, &dataPkt, sizeof(packet));
+                        send(sockfd, &dataPkt, sizeof(packet), 0);
                         bytesSent += bytesToSend;
                     }
                     
@@ -290,13 +390,15 @@ void process_command(int sockfd, packet& pkt) {
                 } else {
                     strcpy(response.payload, "ERROR");
                     response.length = 5;
-                    write(sockfd, &response, sizeof(packet));
+                    printf("DEBUG Server: Sending download response: %s with seq: %d\n", response.payload, response.seqn);
+                    send(sockfd, &response, sizeof(packet), 0);
                 }
             } else {
                 pthread_mutex_unlock(&fileMutex);
                 strcpy(response.payload, "NOT_FOUND");
                 response.length = 9;
-                write(sockfd, &response, sizeof(packet));
+                printf("DEBUG Server: Sending download response: %s with seq: %d\n", response.payload, response.seqn);
+                send(sockfd, &response, sizeof(packet), 0);
             }
             break;
         }
@@ -325,7 +427,8 @@ void process_command(int sockfd, packet& pkt) {
                 strcpy(response.payload, "ERROR");
                 response.length = 5;
             }
-            write(sockfd, &response, sizeof(packet));
+            printf("DEBUG Server: Sending delete response: %s with seq: %d\n", response.payload, response.seqn);
+            send(sockfd, &response, sizeof(packet), 0);
             break;
         }
         
@@ -348,7 +451,8 @@ void process_command(int sockfd, packet& pkt) {
             response.total_size = fileList.size();
             strcpy(response.payload, fileList.substr(0, sizeof(response.payload) - 1).c_str());
             response.length = strlen(response.payload);
-            write(sockfd, &response, sizeof(packet));
+            printf("DEBUG Server: Sending list_server response with seq: %d\n", response.seqn);
+            send(sockfd, &response, sizeof(packet), 0);
             
             // If list is longer than payload, send the rest in DATA packets
             if (fileList.size() > sizeof(response.payload)) {
@@ -356,14 +460,15 @@ void process_command(int sockfd, packet& pkt) {
                 while (bytesSent < fileList.size()) {
                     packet dataPkt;
                     dataPkt.type = DATA_PACKET;
-                    dataPkt.seqn = bytesSent / sizeof(dataPkt.payload) + 1;
+                    // Use the same sequence number as the original command
+                    dataPkt.seqn = response.seqn;
                     
                     size_t bytesToSend = std::min(sizeof(dataPkt.payload) - 1, fileList.size() - bytesSent);
                     strncpy(dataPkt.payload, fileList.c_str() + bytesSent, bytesToSend);
                     dataPkt.payload[bytesToSend] = '\0';
                     dataPkt.length = bytesToSend;
                     
-                    write(sockfd, &dataPkt, sizeof(packet));
+                    send(sockfd, &dataPkt, sizeof(packet), 0);
                     bytesSent += bytesToSend;
                 }
             }
@@ -380,7 +485,9 @@ void process_command(int sockfd, packet& pkt) {
             response.total_size = files.size();
             strcpy(response.payload, "OK");
             response.length = 2;
-            write(sockfd, &response, sizeof(packet));
+            printf("DEBUG Server: Sending get_sync_dir response: %s with seq: %d, total_size: %u\n", 
+                   response.payload, response.seqn, response.total_size);
+            send(sockfd, &response, sizeof(packet), 0);
             
             // Send each file info
             for (const auto& file : files) {
@@ -391,7 +498,7 @@ void process_command(int sockfd, packet& pkt) {
                 strcpy(infoPkt.payload, file.filename.c_str());
                 infoPkt.length = file.filename.length();
                 
-                write(sockfd, &infoPkt, sizeof(packet));
+                send(sockfd, &infoPkt, sizeof(packet), 0);
             }
             break;
         }
@@ -399,7 +506,8 @@ void process_command(int sockfd, packet& pkt) {
         case CMD_EXIT: {
             strcpy(response.payload, "OK");
             response.length = 2;
-            write(sockfd, &response, sizeof(packet));
+            printf("DEBUG Server: Sending exit response: %s with seq: %d\n", response.payload, response.seqn);
+            send(sockfd, &response, sizeof(packet), 0);
             break;
         }
         

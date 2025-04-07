@@ -3,6 +3,7 @@
 #include <vector>
 #include <sstream>
 #include <unistd.h>
+#include <sys/socket.h>
 #include "sync.h"
 
 // Command string constants
@@ -62,7 +63,7 @@ bool process_command(const std::string& command) {
         exit_pkt.total_size = 0;
         exit_pkt.length = 0;
         
-        write(server_socket, &exit_pkt, sizeof(packet));
+        send(server_socket, &exit_pkt, sizeof(packet), 0);
         return false; // Exit command loop
     } 
     else if (cmd == CMD_UPLOAD) {

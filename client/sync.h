@@ -2,7 +2,16 @@
 #define SYNC_H
 
 #include <string>
+#include <mutex>
+#include <map>
+#include <condition_variable>
 #include "../common/packet.h"
+#include <sys/socket.h>  // For socket constants like SOL_SOCKET
+
+// Forward declarations for socket operations
+uint16_t get_next_seq(); 
+bool check_socket_status();
+packet send_command_and_wait(const packet& cmd);
 
 void sync_start(const char* username, const char* server_ip, int port);
 bool sync_dir_exists();
@@ -22,5 +31,15 @@ void get_sync_dir();
 extern int server_socket;
 extern std::string sync_dir_path;
 extern std::string current_username;
+extern std::mutex socket_mutex;
+extern std::map<uint16_t, packet> responses;
+extern std::mutex responses_mutex;
+extern std::condition_variable responses_cv;
+extern uint16_t next_seq_number;
+
+// Monitor thread coordination
+extern std::mutex monitor_ready_mutex;
+extern std::condition_variable monitor_ready_cv;
+extern bool monitor_thread_ready;
 
 #endif
