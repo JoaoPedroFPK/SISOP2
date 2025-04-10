@@ -1,4 +1,4 @@
-#include "sync.h"
+#include "../headers/sync.h"
 #include <cstdio>
 #include <cstdlib>
 #include <iostream>
