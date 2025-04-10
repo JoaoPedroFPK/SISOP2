@@ -1,7 +1,7 @@
 #include <iostream>
-#include "../common/packet.h"
-#include "../client/sync.h"
-#include "../server/connection_handler.h"
+#include "../common/headers/packet.h"
+#include "../client/headers/sync.h"
+#include "../server/headers/connection_handler.h"
 
 // Basic test initialization file
 // Add test framework initialization or common test utilities here
