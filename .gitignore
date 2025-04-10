@@ -3,3 +3,5 @@ sync_dir_*
 server/files/
 
 *.exe
+.vscode/c_cpp_properties.json
+.DS_Store

@@ -1,5 +1,5 @@
-#include "sync.h"
-#include "../common/socket_utils.h"
+#include "../headers/sync.h"
+#include "../../common/headers/socket_utils.h"
 #include <cstdio>
 #include <cstring>
 #include <iostream>
@@ -806,7 +806,7 @@ void list_server_files() {
     struct timeval timeout;
     socklen_t len = sizeof(timeout);
     if (getsockopt(server_socket, SOL_SOCKET, SO_RCVTIMEO, &timeout, &len) == 0) {
-        printf("DEBUG: Current socket receive timeout: %ld seconds, %ld microseconds\n", 
+        printf("DEBUG: Current socket receive timeout: %ld seconds, %d microseconds\n", 
                timeout.tv_sec, timeout.tv_usec);
     }
     
