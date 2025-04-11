@@ -606,7 +606,7 @@ bool download_file(const std::string& filename) {
     }
     
     // Prepare destination path
-    std::string destPath = sync_dir_path + "/" + filename;  // Download to sync directory
+    std::string destPath = fs::current_path().string() + "/" + filename;  // Download to project root directory
     
     // Send download command
     packet cmd;
