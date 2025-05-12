@@ -48,7 +48,7 @@ enum PacketType {
 };
 
 void* handle_client(void* client_sockfd);
-void register_client(const std::string& username, int sockfd);
+bool register_client(const std::string& username, int sockfd);
 void unregister_client(const std::string& username, int sockfd);
 void notify_clients(const std::string& username, const packet& pkt, int excludeSockfd);
 void process_command(int sockfd, packet& pkt);
@@ -128,10 +128,24 @@ void* handle_client(void* arg) {
             username = pkt.payload;
             printf("Login de usuário: %s (seq: %d)\n", username.c_str(), pkt.seqn);
             
-            // Register client
-            register_client(username, sockfd);
+            // Register client and check session limit
+            if (!register_client(username, sockfd)) { 
+                // Error message already printed by register_client
+                // Optionally send error packet back to client before closing
+                packet error_pkt;
+                memset(&error_pkt, 0, sizeof(packet));
+                error_pkt.type = CMD_EXIT; // Use EXIT type to signal client closure
+                error_pkt.seqn = pkt.seqn; // Acknowledge the login attempt sequence
+                const char* errMsg = "Session limit (2) reached";
+                strncpy(error_pkt.payload, errMsg, sizeof(error_pkt.payload)-1);
+                error_pkt.length = strlen(errMsg);
+                send(sockfd, &error_pkt, sizeof(packet), 0); // Best effort send
+                
+                close(sockfd);
+                pthread_exit(NULL); // Exit thread if registration failed
+            }
             
-            // Initialize user directory
+            // Initialize user directory (only if registration succeeded)
             pthread_mutex_lock(&fileMutex);
             fileManager.initUserDirectory(username);
             pthread_mutex_unlock(&fileMutex);
@@ -208,16 +222,26 @@ void* handle_client(void* arg) {
     pthread_exit(NULL);
 }
 
-void register_client(const std::string& username, int sockfd) {
+bool register_client(const std::string& username, int sockfd) { 
     pthread_mutex_lock(&clientsMutex);
     
-    // Add to connected clients
-    ClientInfo info;
-    info.username = username;
-    info.sockfd = sockfd;
-    connectedClients[username].push_back(info);
+    // Check session limit
+    if (connectedClients.count(username) && connectedClients[username].size() >= 2) {
+        printf("SERVER: Session limit (2) reached for user '%s'. Denying connection %d.\n", username.c_str(), sockfd);
+        pthread_mutex_unlock(&clientsMutex);
+        return false; 
+    }
     
+    ClientInfo clientInfo;
+    clientInfo.username = username;
+    clientInfo.sockfd = sockfd;
+    connectedClients[username].push_back(clientInfo);
+    
+    printf("SERVER: Registered client %s on socket %d. Total sessions for user: %zu\n", 
+           username.c_str(), sockfd, connectedClients[username].size());
+           
     pthread_mutex_unlock(&clientsMutex);
+    return true; 
 }
 
 void unregister_client(const std::string& username, int sockfd) {
