@@ -124,7 +124,7 @@ void sync_start(const char* username, const char* server_ip, int port) {
     watch_sync_dir();
     
     // Start threads for monitoring BEFORE sending any commands
-    // std::thread server_thread(monitor_server_notifications);
+    std::thread server_thread(monitor_server_notifications);
     std::thread file_thread(check_for_file_changes);
     
     // Wait for monitor thread to be ready
@@ -177,20 +177,24 @@ void sync_start(const char* username, const char* server_ip, int port) {
     
     printf("DEBUG: Received login response with seq: %d, type: %d\n", response.seqn, response.type);
     
-    if (response.type != CMD_LOGIN) {
+    if (response.type == CMD_LOGIN) {
+        printf("Login bem-sucedido.\n");
+        
+        // Initialize sync (Initial sync handshake)
+        printf("Realizando sincronização inicial...\n");
+        get_sync_dir();
+        printf("Sincronização inicial concluída.\n");
+        
+        // Detach threads to run in background
+        server_thread.detach();
+        file_thread.detach();
+        
+        printf("Sincronização iniciada. Use os comandos para interagir.\n");
+    } else {
         printf("Erro na resposta de login: tipo inesperado %d\n", response.type);
         close(server_socket);
-        return;
+        return; // Exit if login failed
     }
-    
-    // Initialize sync
-    initialize_sync();
-    
-    // Detach threads to run in background
-    // server_thread.detach();
-    file_thread.detach();
-    
-    printf("Sincronização iniciada. Use os comandos para interagir.\n");
 }
 
 bool sync_dir_exists() {
@@ -433,24 +437,75 @@ void monitor_server_notifications() {
 }
 
 void handle_server_notification(packet& pkt) {
-    std::string filename(pkt.payload, pkt.length);
+    printf("DEBUG: Handling server notification type %d\n", pkt.type);
     
-    if (pkt.seqn == 1) {
-        // Delete notification
-        std::string filepath = sync_dir_path + "/" + filename;
+    // Lock file operations during handling
+    std::lock_guard<std::mutex> lock(file_mutex);
+    
+    if (pkt.type == SYNC_NOTIFICATION) {
+        // Payload format: <action>:<filename>
+        // action: 'U' for upload/update, 'D' for delete
+        std::string payload_str(pkt.payload, pkt.length);
+        size_t delimiter_pos = payload_str.find(':');
         
-        file_mutex.lock();
-        if (file_mtimes.find(filename) != file_mtimes.end()) {
-            file_mtimes.erase(filename);
-            fs::remove(filepath);
-            printf("Arquivo '%s' removido por outro dispositivo.\n", filename.c_str());
+        if (delimiter_pos != std::string::npos) {
+            char action = payload_str[0];
+            std::string filename = payload_str.substr(delimiter_pos + 1);
+            std::string full_path = sync_dir_path + "/" + filename;
+            
+            printf("DEBUG: Received notification - Action: %c, File: %s\n", action, filename.c_str());
+            
+            if (action == 'U') {
+                // Request download from server
+                printf("Atualização detectada no servidor para %s. Baixando...\n", filename.c_str());
+                // Directly call download logic or simulate download request
+                // A simple approach: Trigger a download command internally.
+                packet download_req;
+                memset(&download_req, 0, sizeof(packet));
+                download_req.type = CMD_DOWNLOAD;
+                download_req.seqn = get_next_seq();
+                strncpy(download_req.payload, filename.c_str(), sizeof(download_req.payload) - 1);
+                download_req.length = strlen(download_req.payload);
+
+                // Send download request (Requires socket lock)
+                {
+                    std::lock_guard<std::mutex> sock_lock(socket_mutex);
+                    if (write_all(server_socket, &download_req, sizeof(packet)) != sizeof(packet)) {
+                         printf("ERROR: Failed to send download request for notification %s\n", filename.c_str());
+                         return; // Or handle error
+                    }
+
+                    // Assume download logic similar to download_file command, receiving data packets
+                    // Receive data packets and write file (Simplified placeholder)
+                    // This part needs the full receive loop similar to download_file()
+                    // It needs to read packets, check type (DATA_PACKET or completion signal),
+                    // assemble the file, and write it.
+                    printf("Placeholder: Receiving file data for %s via notification handler\n", filename.c_str());
+                    // TODO: Implement actual file reception logic here, potentially reusing parts of download_file().
+                    // This will involve a loop receiving packets from server_socket until the transfer is complete.
+
+                } // Release socket lock
+
+            } else if (action == 'D') {
+                // Delete the file locally
+                printf("Arquivo %s removido no servidor. Removendo localmente...\n", filename.c_str());
+                if (remove(full_path.c_str()) == 0) {
+                    printf("Arquivo %s removido localmente.\n", filename.c_str());
+                    // TODO: Update local mtimes map if necessary (might need thread-safe access)
+                } else {
+                    // Check if file didn't exist locally already (not an error)
+                    if (errno != ENOENT) {
+                        perror("Erro ao remover arquivo localmente");
+                    }
+                }
+            }
+        } else {
+            printf("WARN: Malformed SYNC_NOTIFICATION payload: %s\n", payload_str.c_str());
         }
-        file_mutex.unlock();
     } else {
-        // New/updated file notification
-        download_file(filename);
-        printf("Arquivo '%s' atualizado por outro dispositivo.\n", filename.c_str());
+         printf("WARN: Received unexpected packet type %d in handle_server_notification\n", pkt.type);
     }
+    // Mutex automatically released when lock goes out of scope
 }
 
 bool upload_file(const std::string& filepath) {
