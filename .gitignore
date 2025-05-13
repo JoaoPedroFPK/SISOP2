@@ -5,3 +5,6 @@ server/files/
 *.exe
 .vscode/c_cpp_properties.json
 .DS_Store
+server/server
+client/client
+.vscode/settings.json

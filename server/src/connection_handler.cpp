@@ -11,8 +11,12 @@
 #include <vector>
 #include <mutex>
 #include <sys/socket.h>
-#include <netinet/tcp.h>  // For TCP_NODELAY and IPPROTO_TCP
+// #include <netinet/tcp.h>  // For TCP_NODELAY and IPPROTO_TCP // macOS only?
+// The following two headers are needed for TCP_NODELAY and IPPROTO_TCP, required for Linux
+#include <netinet/in.h>
+#include <linux/tcp.h>
 #include <fcntl.h>
+
 
 // Global FileManager instance
 static FileManager fileManager;
