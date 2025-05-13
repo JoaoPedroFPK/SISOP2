@@ -58,6 +58,7 @@ int main(int argc, char* argv[]) {
     sync_start(username, server_ip, port);
 
     // Configure Isocline
+    ic_set_history(NULL, -1 /* default entries (= 200) */);
     ic_set_default_completer(&completer, NULL); // Set autocompletion callback
     ic_enable_auto_tab(true); // Automatically complete if there's only one match
 
