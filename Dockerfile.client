@@ -1,0 +1,27 @@
+FROM ubuntu:22.04
+
+RUN apt-get update && \
+    apt-get install -y build-essential g++ make cmake vim git libpthread-stubs0-dev net-tools && \
+    rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# Copy source files and build scripts
+COPY Makefile /app/
+COPY server /app/server/
+COPY client /app/client/
+COPY common /app/common/
+COPY src /app/src/
+COPY include /app/include/
+
+# Create necessary directories
+RUN mkdir -p client/sync_dir
+
+# Build only the client component
+RUN make clean && make client
+
+# Create log directory
+RUN mkdir -p /app/logs
+
+# Keep container running for client interactions
+CMD ["/bin/bash"]

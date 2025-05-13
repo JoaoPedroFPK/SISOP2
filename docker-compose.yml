@@ -2,27 +2,43 @@ version: '3.8'
 
 services:
   server:
-    build: .
+    build:
+      context: .
+      dockerfile: Dockerfile.server
     container_name: server
     volumes:
-      - .:/app
-    command: ./server/server 8080
+      - server_data:/app/server/files
     ports:
-      - "8080:8080"
+      - "8090:8080"
     networks:
-      - net
+      - dropbox_network
+    healthcheck:
+      test: ["CMD", "nc", "-z", "localhost", "8080"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
 
   client:
-    build: .
+    build:
+      context: .
+      dockerfile: Dockerfile.client
     container_name: client
     volumes:
-      - .:/app
-    command: /bin/bash
+      - client_data:/app/client/sync_dir
+      - ./logs:/app/logs
     stdin_open: true
     tty: true
+    depends_on:
+      server:
+        condition: service_healthy
     networks:
-      - net
+      - dropbox_network
+    command: ["/bin/bash"]
+
+volumes:
+  server_data:
+  client_data:
 
 networks:
-  net:
+  dropbox_network:
     driver: bridge

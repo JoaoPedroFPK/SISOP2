@@ -1,0 +1,27 @@
+FROM ubuntu:22.04
+
+RUN apt-get update && \
+    apt-get install -y build-essential g++ make cmake vim git libpthread-stubs0-dev net-tools netcat && \
+    rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# Copy source files and build scripts
+COPY Makefile /app/
+COPY server /app/server/
+COPY client /app/client/
+COPY common /app/common/
+COPY src /app/src/
+COPY include /app/include/
+
+# Create necessary directories
+RUN mkdir -p /app/server/files
+
+# Build only the server component
+RUN make clean && make server
+
+# Expose the port that the server listens on
+EXPOSE 8080
+
+# Run the server - ensuring it binds to all interfaces (0.0.0.0)
+CMD ["bash", "-c", "cd /app && ./server/server 8080"]
