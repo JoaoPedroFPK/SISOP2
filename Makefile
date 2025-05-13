@@ -1,12 +1,18 @@
 .PHONY: all server client clean
 
+SERVER_SRC = $(wildcard server/src/*.cpp) $(wildcard common/src/*.cpp)
+CLIENT_SRC = $(wildcard client/src/*.cpp) $(wildcard common/src/*.cpp) src/isocline.c
+INCLUDES   = -I include/
+
+CXXFLAGS = -std=c++17 -pthread
+
 all: server client
 
 server:
-	g++ -std=c++17 -o server/server server/src/*.cpp common/src/*.cpp -pthread
+	g++ $(CXXFLAGS) -o server/server $(SERVER_SRC)
 
 client:
-	g++ -std=c++17 -o client/client client/src/*.cpp common/src/*.cpp src/isocline.c include/isocline.h -pthread -I include/
+	g++ $(CXXFLAGS) -o client/client $(CLIENT_SRC) $(INCLUDES)
 
 clean:
 	rm -f server/server client/client
