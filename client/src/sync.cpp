@@ -1,5 +1,5 @@
-#include "../headers/sync.h"
-#include "../../common/headers/socket_utils.h"
+#include "sync.h"
+#include "socket_utils.h"
 #include <cstdio>
 #include <cstring>
 #include <iostream>

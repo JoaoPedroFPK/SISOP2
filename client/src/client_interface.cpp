@@ -4,7 +4,7 @@
 #include <sstream>
 #include <unistd.h>
 #include <sys/socket.h>
-#include "../headers/sync.h"
+#include "sync.h"
 
 // Command string constants
 const std::string CMD_EXIT = "exit";

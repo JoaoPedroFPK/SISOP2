@@ -1,7 +1,7 @@
-#include "../headers/connection_handler.h"
-#include "../headers/file_manager.h"
-#include "../../common/headers/packet.h"
-#include "../../common/headers/socket_utils.h"
+#include "connection_handler.h"
+#include "file_manager.h"
+#include "packet.h"
+#include "socket_utils.h"
 #include <pthread.h>
 #include <cstdio>
 #include <cstdlib>

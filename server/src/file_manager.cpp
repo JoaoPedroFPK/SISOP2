@@ -1,4 +1,4 @@
-#include "../headers/file_manager.h"
+#include "file_manager.h"
 #include <iostream>
 #include <fstream>
 #include <sys/stat.h>

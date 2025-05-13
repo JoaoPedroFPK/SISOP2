@@ -5,7 +5,7 @@
 #include <mutex>
 #include <map>
 #include <condition_variable>
-#include "../../common/headers/packet.h"
+#include "packet.h"
 #include <sys/socket.h>  // For socket constants like SOL_SOCKET
 
 // Forward declarations for socket operations

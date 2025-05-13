@@ -1,12 +1,20 @@
 .PHONY: all server client clean
 
+CPP 	 =  clang++
+CPPFLAGS = -std=c++17
+CPPFLAGS += -Icommon/headers -Iclient/headers -Iserver/headers -I.
+CPPFLAGS += -Iclient/tests/
+CPPFLAGS += -pthread
+CPPFLAGS += -Wall -Wextra
+
 all: server client
 
+
 server:
-	g++ -std=c++17 -o server/server server/src/*.cpp common/src/*.cpp -pthread
+	$(CPP) $(CPPFLAGS) -o server/server server/src/*.cpp common/src/*.cpp
 
 client:
-	g++ -std=c++17 -o client/client client/src/*.cpp common/src/*.cpp -pthread
+	$(CPP) $(CPPFLAGS) -o client/client client/src/*.cpp common/src/*.cpp
 
 clean:
-	rm -f server/server client/client
+	rm -rf server/bin client/bin
