@@ -72,7 +72,7 @@ void check_for_file_changes();
 void process_file_change(const std::string& filename, bool is_deleted);
 void update_file_mtimes();
 
-void sync_start(const char* username, const char* server_ip, int port) {
+bool sync_start(const char* username, const char* server_ip, int port) {
     printf("Iniciando sessão para o usuário %s...\n", username);
 
     // Save username
@@ -115,7 +115,7 @@ void sync_start(const char* username, const char* server_ip, int port) {
 
     if (connect_socket(server_socket, server_ip, port) < 0) {
         perror("Erro ao conectar ao servidor");
-        return;
+        return false;
     }
 
     printf("Conectado ao servidor %s:%d\n", server_ip, port);
@@ -154,7 +154,7 @@ void sync_start(const char* username, const char* server_ip, int port) {
         if (bytes_sent <= 0) {
             printf("ERROR: Failed to send login packet: %s\n", strerror(errno));
             close(server_socket);
-            return;
+            return false;
         }
         printf("DEBUG: Sent %zd bytes directly via socket\n", bytes_sent);
     }
@@ -170,7 +170,7 @@ void sync_start(const char* username, const char* server_ip, int port) {
         if (bytes_received <= 0) {
             printf("ERROR: Failed to receive login response: %s\n", strerror(errno));
             close(server_socket);
-            return;
+            return false;
         }
         printf("DEBUG: Received %zd bytes login response\n", bytes_received);
     }
@@ -190,10 +190,13 @@ void sync_start(const char* username, const char* server_ip, int port) {
         file_thread.detach();
 
         printf("Sincronização iniciada. Use os comandos para interagir.\n");
+
+        // Successful start
+        return true;
     } else {
         printf("Erro na resposta de login: tipo inesperado %d\n", response.type);
         close(server_socket);
-        return; // Exit if login failed
+        return false; // Exit if login failed
     }
 }
 

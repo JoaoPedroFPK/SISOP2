@@ -120,8 +120,11 @@ int main(int argc, char* argv[]) {
 
     std::cout << "Conectando como '" << username << "' em " << server_ip << ":" << port << "..." << std::endl;
 
-    // Start synchronization in background
-    sync_start(username_c, server_ip_c, port);
+    // Start synchronization in background; if it fails, exit.
+    if (!sync_start(username_c, server_ip_c, port)) {
+        std::cerr << "Não foi possível iniciar a sincronização. Verifique se o servidor está online e tente novamente." << std::endl;
+        return 1;
+    }
 
     // Configure Isocline
     ic_set_history(NULL, -1 /* default entries (= 200) */);

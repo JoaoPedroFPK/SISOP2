@@ -13,7 +13,7 @@ uint16_t get_next_seq();
 bool check_socket_status();
 packet send_command_and_wait(const packet& cmd);
 
-void sync_start(const char* username, const char* server_ip, int port);
+bool sync_start(const char* username, const char* server_ip, int port);
 bool sync_dir_exists();
 void create_sync_dir();
 void watch_sync_dir();
