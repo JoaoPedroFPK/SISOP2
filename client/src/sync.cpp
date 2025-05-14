@@ -1,5 +1,6 @@
 #include "sync.h"
 #include "socket_utils.h"
+#include "packet.h"  // Explicit include to guarantee visibility of struct packet
 #include <cstdio>
 #include <cstring>
 #include <iostream>
@@ -23,6 +24,7 @@
 #include <map>
 #include <condition_variable>
 #include <errno.h>
+#include <atomic>
 
 namespace fs = std::filesystem;
 
@@ -30,6 +32,13 @@ namespace fs = std::filesystem;
 int server_socket = -1;
 std::string sync_dir_path;
 std::string current_username;
+
+// Store server endpoint so we can attempt to reconnect later
+static std::string g_server_ip;
+static int g_server_port = 0;
+
+// Flag that tells every thread whether the TCP connection is still alive
+static std::atomic<bool> connection_alive{true};
 
 // Mutex for file operations
 std::mutex file_mutex;
@@ -113,6 +122,9 @@ bool sync_start(const char* username, const char* server_ip, int port) {
         perror("Error setting TCP_NODELAY");
     }
 
+    g_server_ip = server_ip;
+    g_server_port = port;
+
     if (connect_socket(server_socket, server_ip, port) < 0) {
         perror("Erro ao conectar ao servidor");
         return false;
@@ -190,6 +202,8 @@ bool sync_start(const char* username, const char* server_ip, int port) {
         file_thread.detach();
 
         printf("Sincronização iniciada. Use os comandos para interagir.\n");
+
+        connection_alive.store(true);
 
         // Successful start
         return true;
@@ -375,10 +389,10 @@ void monitor_server_notifications() {
             std::lock_guard<std::mutex> lock(socket_mutex);
             size_t bytes_read = read_all(server_socket, &pkt, sizeof(packet));
             if (bytes_read != sizeof(packet)) {
-                printf("Error reading from server: read %zu of %zu bytes (errno=%d: %s)\n",
-                       bytes_read, sizeof(packet), errno, strerror(errno));
-                // TODO: Handle reconnection
-                break;
+                printf("ERROR: Lost connection to server (read %zu of %zu).\n",
+                       bytes_read, sizeof(packet));
+                connection_alive.store(false);
+                break; // Exit monitor thread; other threads will notice connection loss
             }
         }
 
@@ -877,6 +891,11 @@ bool delete_file(const std::string& filename) {
 
 // Helper function to check socket status
 bool check_socket_status() {
+    if (!connection_alive.load()) {
+        printf("ERROR: Connection to server lost.\n");
+        return false;
+    }
+
     int error = 0;
     socklen_t len = sizeof(error);
     int retval = getsockopt(server_socket, SOL_SOCKET, SO_ERROR, &error, &len);

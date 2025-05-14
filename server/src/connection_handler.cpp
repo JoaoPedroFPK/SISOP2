@@ -264,21 +264,30 @@ void unregister_client(const std::string& username, int sockfd) {
 }
 
 void notify_clients(const std::string& username, const packet& pkt, int excludeSockfd) {
-    pthread_mutex_lock(&clientsMutex);
+    std::vector<int> sockets_to_notify;
 
-    // Send notification to all connected clients of this user except the source
+    // Copy the list of sockets while holding the mutex for the minimum time
+    pthread_mutex_lock(&clientsMutex);
     auto it = connectedClients.find(username);
     if (it != connectedClients.end()) {
         for (const auto& client : it->second) {
             if (client.sockfd != excludeSockfd) {
-                printf("DEBUG Server: Notifying client on socket %d about file: %s\n",
-                       client.sockfd, pkt.payload);
-                send(client.sockfd, &pkt, sizeof(packet), 0);
+                sockets_to_notify.push_back(client.sockfd);
             }
         }
     }
-
     pthread_mutex_unlock(&clientsMutex);
+
+    // Now send outside the critical section so a slow / blocked socket does
+    // not freeze the whole server.
+    for (int fd : sockets_to_notify) {
+        printf("DEBUG Server: Notifying client on socket %d about file: %s\n", fd, pkt.payload);
+        // Use non-blocking send with MSG_DONTWAIT so we never block indefinitely.
+        ssize_t s = send(fd, &pkt, sizeof(packet), MSG_DONTWAIT | MSG_NOSIGNAL);
+        if (s < 0) {
+            printf("WARN: Failed to notify socket %d: %s\n", fd, strerror(errno));
+        }
+    }
 }
 
 void process_command(int sockfd, packet& pkt) {
