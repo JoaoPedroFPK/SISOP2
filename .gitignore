@@ -8,3 +8,4 @@ server/files/
 server/server
 client/client
 .vscode/settings.json
+input-files/
