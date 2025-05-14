@@ -5,11 +5,11 @@
 #include <mutex>
 #include <map>
 #include <condition_variable>
-#include "../../common/headers/packet.h"
+#include "packet.h"
 #include <sys/socket.h>  // For socket constants like SOL_SOCKET
 
 // Forward declarations for socket operations
-uint16_t get_next_seq(); 
+uint16_t get_next_seq();
 bool check_socket_status();
 packet send_command_and_wait(const packet& cmd);
 

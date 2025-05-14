@@ -1,5 +1,5 @@
-#include "../headers/sync.h"
-#include "../headers/commands.h"
+#include "sync.h"
+#include "commands.h"
 #include <iostream>
 #include <string>
 #include <vector>
@@ -12,11 +12,11 @@ std::vector<std::string> split_command(const std::string& str) {
     std::vector<std::string> tokens;
     std::istringstream iss(str);
     std::string token;
-    
+
     while (iss >> token) {
         tokens.push_back(token);
     }
-    
+
     return tokens;
 }
 
@@ -38,14 +38,14 @@ bool process_command(const std::string& command) {
     if (command.empty()) {
         return true;
     }
-    
+
     std::vector<std::string> tokens = split_command(command);
     if (tokens.empty()) {
         return true;
     }
-    
+
     std::string cmd = tokens[0];
-    
+
     if (cmd == CMD_EXIT) {
         // Send exit packet and close connection
         packet exit_pkt;
@@ -53,16 +53,16 @@ bool process_command(const std::string& command) {
         exit_pkt.seqn = 0;
         exit_pkt.total_size = 0;
         exit_pkt.length = 0;
-        
+
         send(server_socket, &exit_pkt, sizeof(packet), 0);
         return false; // Exit command loop
-    } 
+    }
     else if (cmd == CMD_UPLOAD) {
         if (tokens.size() < 2) {
             std::cout << "Uso: " << CMD_UPLOAD << " <path/filename.ext>" << std::endl;
             return true;
         }
-        
+
         upload_file(tokens[1]);
     }
     else if (cmd == CMD_DOWNLOAD) {
@@ -70,7 +70,7 @@ bool process_command(const std::string& command) {
             std::cout << "Uso: " << CMD_DOWNLOAD << " <filename.ext>" << std::endl;
             return true;
         }
-        
+
         download_file(tokens[1]);
     }
     else if (cmd == CMD_DELETE) {
@@ -78,7 +78,7 @@ bool process_command(const std::string& command) {
             std::cout << "Uso: " << CMD_DELETE << " <filename.ext>" << std::endl;
             return true;
         }
-        
+
         delete_file(tokens[1]);
     }
     else if (cmd == CMD_LIST_SERVER) {
@@ -97,6 +97,6 @@ bool process_command(const std::string& command) {
         std::cout << "Comando desconhecido: " << cmd << std::endl;
         print_help();
     }
-    
+
     return true; // Continue command loop
 }

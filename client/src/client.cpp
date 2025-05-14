@@ -1,5 +1,5 @@
-#include "../headers/sync.h"
-#include "../headers/commands.h" 
+#include "sync.h"
+#include "commands.h"
 #include <cstdio>
 #include <cstdlib>
 #include <iostream>
