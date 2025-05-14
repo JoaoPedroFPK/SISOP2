@@ -322,13 +322,18 @@ void process_command(int sockfd, packet& pkt) {
             // Loop to receive all file data packets
             while (bytesRead < pkt.total_size) {
                 packet dataPkt;
-                if (read(sockfd, &dataPkt, sizeof(packet)) <= 0) {
-                    printf("DEBUG Server: Error reading data packet\n");
+                // Reliably read an entire packet. Using read_all protects against partial
+                // TCP deliveries that occur when multiple sessions are active.
+                size_t got = read_all(sockfd, &dataPkt, sizeof(packet));
+
+                if (got != sizeof(packet)) {
+                    printf("DEBUG Server: Error reading data packet (read %zu of %zu bytes)\n", got, sizeof(packet));
                     break;
                 }
 
-                if (dataPkt.type != DATA_PACKET) {
-                    printf("DEBUG Server: Received unexpected packet type: %d\n", dataPkt.type);
+                // Basic sanity-check of the packet
+                if (dataPkt.type != DATA_PACKET || dataPkt.length > sizeof(dataPkt.payload)) {
+                    printf("DEBUG Server: Malformed data packet received (type=%d, length=%d)\n", dataPkt.type, dataPkt.length);
                     break;
                 }
 
