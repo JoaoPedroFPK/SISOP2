@@ -5,6 +5,7 @@
 #include <unistd.h>
 #include <filesystem>
 #include <dirent.h>
+#include <fcntl.h>
 
 namespace fs = std::filesystem;
 
@@ -30,10 +31,26 @@ std::vector<FileInfo> FileManager::listUserFiles(const std::string& username) {
     std::vector<FileInfo> files;
     std::string userDir = getUserDir(username);
 
+    // Ensure directory exists
     if (!fs::exists(userDir)) {
         return files;
     }
 
+    // Force cache refresh by doing a directory read with a system call first
+    DIR* dir = opendir(userDir.c_str());
+    if (dir) {
+        // Just open and close to refresh the directory information
+        closedir(dir);
+    }
+
+    // Clear any filesystem cache to force a fresh read
+    fs::directory_iterator end;
+    fs::directory_iterator it(userDir);
+    
+    // Reset the iterator to force a fresh directory read
+    it = fs::directory_iterator(userDir);
+
+    // Now collect files with the refreshed view
     for (const auto& entry : fs::directory_iterator(userDir)) {
         if (entry.is_regular_file()) {
             struct stat fileStat;
@@ -65,11 +82,44 @@ bool FileManager::saveFile(const std::string& username, const std::string& filen
     std::ofstream file(filepath, std::ios::binary);
 
     if (!file) {
+        std::cerr << "ERROR: Failed to open file for writing: " << filepath << std::endl;
         return false;
     }
 
+    // Write file data
     file.write(data, size);
-    return file.good();
+    
+    // Check for errors and flush to ensure data is written
+    if (!file.good()) {
+        std::cerr << "ERROR: Error writing to file: " << filepath << std::endl;
+        file.close();
+        return false;
+    }
+    
+    // Explicitly flush to disk
+    file.flush();
+    
+    // Close the file
+    file.close();
+
+    // Sync the parent directory to update directory entry (important!)
+    std::string userDir = getUserDir(username);
+    int dirfd = open(userDir.c_str(), O_RDONLY);
+    if (dirfd >= 0) {
+        fsync(dirfd);  // Force directory entry update
+        close(dirfd);
+    }
+    
+    // Double check the file exists and has the right size
+    struct stat st;
+    if (stat(filepath.c_str(), &st) != 0 || st.st_size != size) {
+        std::cerr << "ERROR: File verification failed after save: " << filepath << std::endl;
+        return false;
+    }
+    
+    std::cout << "File saved successfully: " << filepath 
+              << " (size: " << size << " bytes)" << std::endl;
+    return true;
 }
 
 bool FileManager::getFile(const std::string& username, const std::string& filename,
