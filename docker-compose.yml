@@ -9,12 +9,12 @@ services:
     volumes:
       - server_data:/app/server/files
     ports:
-      - "8090:8080"
+      - "8090:5001"
     networks:
       - dropbox_network
-    command: ["./server/server", "8080"]
+    command: ["./server/server", "5001"]
     healthcheck:
-      test: ["CMD", "nc", "-z", "localhost", "8080"]
+      test: ["CMD", "nc", "-z", "localhost", "5001"]
       interval: 10s
       timeout: 5s
       retries: 3
@@ -34,7 +34,7 @@ services:
         condition: service_healthy
     networks:
       - dropbox_network
-    # Client needs manual startup with: ./client/client testuser server 8080
+    # Client needs manual startup with: ./client/client testuser server 5001
     command: ["/bin/bash"]
 
   client2:
@@ -52,7 +52,7 @@ services:
         condition: service_healthy
     networks:
       - dropbox_network
-    # Client needs manual startup with: ./client/client testuser server 8080
+    # Client needs manual startup with: ./client/client testuser server 5001
     command: ["/bin/bash"]
 
 volumes:
