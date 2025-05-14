@@ -6,6 +6,8 @@
 #include <vector>
 #include <string>
 #include <isocline.h> // Include Isocline
+#include <arpa/inet.h>
+#include <limits>
 
 using namespace std;
 
@@ -45,17 +47,81 @@ static void completer(ic_completion_env_t* cenv, const char* input) {
 }
 
 int main(int argc, char* argv[]) {
-    if (argc != 4) {
-        printf("Uso: ./client <username> <server_ip_address> <port>\n");
-        return 1;
-    }
+    std::string username;
+    std::string server_ip;
+    int port = 0;
 
-    const char* username = argv[1];
-    const char* server_ip = argv[2];
-    int port = atoi(argv[3]);
+    auto ask_username = [&]() {
+        while (true) {
+            std::cout << "Digite o nome de usuário: ";
+            std::getline(std::cin, username);
+            if (!username.empty()) break;
+            std::cout << "Nome de usuário não pode ser vazio.\n";
+        }
+    };
+
+    auto ask_ip = [&]() {
+        while (true) {
+            std::cout << "Digite o endereço IP do servidor: ";
+            std::getline(std::cin, server_ip);
+            struct sockaddr_in sa{};
+            if (inet_pton(AF_INET, server_ip.c_str(), &(sa.sin_addr)) == 1) break;
+            std::cout << "Endereço IP inválido.\n";
+        }
+    };
+
+    auto ask_port = [&]() {
+        while (true) {
+            std::cout << "Digite a porta (1-65535): ";
+            if (!(std::cin >> port)) {
+                std::cin.clear();
+                std::cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
+                std::cout << "Valor inválido.\n";
+                continue;
+            }
+            std::cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
+            if (port > 0 && port <= 65535) break;
+            std::cout << "Porta fora do intervalo permitido.\n";
+        }
+    };
+
+    // Parse provided arguments, prompting for missing/invalid ones
+    if (argc >= 2) {
+        username = argv[1];
+    }
+    if (username.empty()) ask_username();
+
+    if (argc >= 3) {
+        server_ip = argv[2];
+        struct sockaddr_in sa{};
+        if (inet_pton(AF_INET, server_ip.c_str(), &(sa.sin_addr)) != 1) {
+            std::cout << "Endereço IP fornecido é inválido.\n";
+            server_ip.clear();
+        }
+    }
+    if (server_ip.empty()) ask_ip();
+
+    if (argc >= 4) {
+        std::string port_str = argv[3];
+        try {
+            port = std::stoi(port_str);
+        } catch (...) {
+            port = 0;
+        }
+        if (port <= 0 || port > 65535) {
+            std::cout << "Porta fornecida inválida.\n";
+            port = 0;
+        }
+    }
+    if (port == 0) ask_port();
+
+    const char* username_c = username.c_str();
+    const char* server_ip_c = server_ip.c_str();
+
+    std::cout << "Conectando como '" << username << "' em " << server_ip << ":" << port << "..." << std::endl;
 
     // Start synchronization in background
-    sync_start(username, server_ip, port);
+    sync_start(username_c, server_ip_c, port);
 
     // Configure Isocline
     ic_set_history(NULL, -1 /* default entries (= 200) */);
