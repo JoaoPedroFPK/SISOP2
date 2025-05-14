@@ -355,8 +355,10 @@ void process_command(int sockfd, packet& pkt) {
                 notifyPkt.type = SYNC_NOTIFICATION;
                 notifyPkt.seqn = 0;
                 notifyPkt.total_size = 0;
-                strcpy(notifyPkt.payload, filename.c_str());
-                notifyPkt.length = filename.length();
+                std::string payload = std::string("U:") + filename;
+                strncpy(notifyPkt.payload, payload.c_str(), sizeof(notifyPkt.payload) - 1);
+                notifyPkt.payload[sizeof(notifyPkt.payload)-1] = '\0';
+                notifyPkt.length = strlen(notifyPkt.payload);
 
                 printf("DEBUG Server: Notifying other clients about file: %s\n", filename.c_str());
                 notify_clients(username, notifyPkt, sockfd);
@@ -442,10 +444,12 @@ void process_command(int sockfd, packet& pkt) {
                 // Notify other clients
                 packet notifyPkt;
                 notifyPkt.type = SYNC_NOTIFICATION;
-                notifyPkt.seqn = 1; // Use seqn=1 to indicate deletion
+                notifyPkt.seqn = 0;
                 notifyPkt.total_size = 0;
-                strcpy(notifyPkt.payload, filename.c_str());
-                notifyPkt.length = filename.length();
+                std::string payload = std::string("D:") + filename;
+                strncpy(notifyPkt.payload, payload.c_str(), sizeof(notifyPkt.payload) - 1);
+                notifyPkt.payload[sizeof(notifyPkt.payload)-1] = '\0';
+                notifyPkt.length = strlen(notifyPkt.payload);
 
                 notify_clients(username, notifyPkt, sockfd);
 
@@ -523,8 +527,10 @@ void process_command(int sockfd, packet& pkt) {
                 infoPkt.type = SYNC_NOTIFICATION;
                 infoPkt.seqn = 0;
                 infoPkt.total_size = file.size;
-                strcpy(infoPkt.payload, file.filename.c_str());
-                infoPkt.length = file.filename.length();
+                std::string payload = std::string("U:") + file.filename;
+                strncpy(infoPkt.payload, payload.c_str(), sizeof(infoPkt.payload) - 1);
+                infoPkt.payload[sizeof(infoPkt.payload)-1] = '\0';
+                infoPkt.length = strlen(infoPkt.payload);
 
                 send(sockfd, &infoPkt, sizeof(packet), 0);
             }

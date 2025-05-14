@@ -500,7 +500,48 @@ void handle_server_notification(packet& pkt) {
                 }
             }
         } else {
-            printf("WARN: Malformed SYNC_NOTIFICATION payload: %s\n", payload_str.c_str());
+            // Support legacy format where action is indicated by seqn (0 = update, 1 = delete)
+            char action = (pkt.seqn == 1) ? 'D' : 'U';
+            std::string filename = payload_str; // Entire payload is the filename
+            std::string full_path = sync_dir_path + "/" + filename;
+
+            printf("INFO: Handling legacy SYNC_NOTIFICATION (seqn=%d) - Action: %c, File: %s\n",
+                   pkt.seqn, action, filename.c_str());
+
+            if (action == 'U') {
+                // Treat as update
+                printf("Atualização detectada no servidor para %s. Baixando...\n", filename.c_str());
+                // Reuse existing download logic (same as above)
+                packet download_req;
+                memset(&download_req, 0, sizeof(packet));
+                download_req.type = CMD_DOWNLOAD;
+                download_req.seqn = get_next_seq();
+                strncpy(download_req.payload, filename.c_str(), sizeof(download_req.payload) - 1);
+                download_req.length = strlen(download_req.payload);
+
+                {
+                    std::lock_guard<std::mutex> sock_lock(socket_mutex);
+                    if (write_all(server_socket, &download_req, sizeof(packet)) != sizeof(packet)) {
+                        printf("ERROR: Failed to send download request for notification %s\n", filename.c_str());
+                        return; // Or handle error
+                    }
+
+                    printf("Placeholder: Receiving file data for %s via legacy notification handler\n", filename.c_str());
+                    // TODO: Implement actual file reception (reuse download_file)
+                }
+
+            } else if (action == 'D') {
+                printf("Arquivo %s removido no servidor. Removendo localmente...\n", filename.c_str());
+                if (remove(full_path.c_str()) == 0) {
+                    printf("Arquivo %s removido localmente.\n", filename.c_str());
+                } else {
+                    if (errno != ENOENT) {
+                        perror("Erro ao remover arquivo localmente");
+                    }
+                }
+            } else {
+                printf("WARN: Unknown legacy SYNC_NOTIFICATION action (seqn=%d) for file %s\n", pkt.seqn, filename.c_str());
+            }
         }
     } else {
          printf("WARN: Received unexpected packet type %d in handle_server_notification\n", pkt.type);
