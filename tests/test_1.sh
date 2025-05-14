@@ -41,7 +41,6 @@ NC="\033[0m" # No Color
 # Define test parameters
 TEST_USER="user-test-case-1"
 SERVER_PORT="5001"
-SERVER_HOST="server"
 TEST_FILENAME="test_sync_file.txt"
 TEST_CONTENT="This is a test file for synchronization testing $(date)"
 
@@ -61,7 +60,7 @@ docker-compose up -d
 echo "Waiting for server to be ready..."
 sleep 10
 
-# Step 3: Verify server container is running
+# Step 3: Verify server container is running and get its IP
 if ! docker ps | grep -q "server"; then
     echo -e "${RED}[FAILED]${NC} Server container is not running!"
     mark_as_failed
@@ -69,22 +68,33 @@ if ! docker ps | grep -q "server"; then
     exit 1
 fi
 
+# Get server container IP address
+SERVER_CONTAINER_ID=$(docker ps -q -f name=server)
+SERVER_HOST=$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' $SERVER_CONTAINER_ID)
+echo "Server container IP: ${SERVER_HOST}"
+
 # Step 4: Start server application on specified port
 echo "Starting server on port ${SERVER_PORT}..."
-docker exec -i server sh -c "./server/server ${SERVER_PORT}" &
-SERVER_PID=$!
-
-# Give server more time to initialize
-sleep 5
+# First check if server is already running
+if docker exec -i server pgrep -f "./server/server ${SERVER_PORT}" > /dev/null; then
+    echo "Server already running on port ${SERVER_PORT}"
+else
+    docker exec -i server sh -c "./server/server ${SERVER_PORT}" &
+    SERVER_PID=$!
+    # Give server more time to initialize
+    sleep 5
+fi
 
 # Step 5: Start clients with the same username
 echo "Starting client1..."
 docker exec -i client1 sh -c "./client/client ${TEST_USER} ${SERVER_HOST} ${SERVER_PORT}" &
 CLIENT1_PID=$!
+echo "Client1 connecting to server at ${SERVER_HOST}:${SERVER_PORT}"
 
 echo "Starting client2..."
 docker exec -i client2 sh -c "./client/client ${TEST_USER} ${SERVER_HOST} ${SERVER_PORT}" &
 CLIENT2_PID=$!
+echo "Client2 connecting to server at ${SERVER_HOST}:${SERVER_PORT}"
 
 # Allow time for clients to connect and initialize sync_dir
 sleep 10
@@ -93,22 +103,36 @@ sleep 10
 echo "Waiting for sync directories to be fully initialized..."
 sleep 5
 
+# Set the correct sync directory path (at the root of the project)
+SYNC_DIR_PATH="/app/sync_dir_${TEST_USER}"
+echo "Using sync directory path: ${SYNC_DIR_PATH}"
+
 # Step 7: Create a test file in client1's sync_dir
 echo "Creating test file in client1's sync_dir..."
-TEST_FILE_PATH="/app/client/sync_dir_${TEST_USER}/${TEST_FILENAME}"
-docker exec -i client1 sh -c "echo '${TEST_CONTENT}' > ${TEST_FILE_PATH} && sync" # sync ensures file is written to disk
+TEST_FILE_PATH="${SYNC_DIR_PATH}/${TEST_FILENAME}"
+docker exec -i client1 sh -c "echo '${TEST_CONTENT}' > ${TEST_FILE_PATH} && sync && chmod 644 ${TEST_FILE_PATH}" # sync ensures file is written to disk
+
+# Check if the file was created successfully
+if ! docker exec -i client1 sh -c "test -f ${TEST_FILE_PATH}"; then
+  echo -e "${RED}[FAILED]${NC} Could not create test file in client1's sync_dir"
+  echo "Attempted to create file at: ${TEST_FILE_PATH}"
+  docker exec -i client1 sh -c "ls -la ${SYNC_DIR_PATH}/.. | grep sync_dir"
+  mark_as_failed
+  print_all_logs
+  exit 1
+fi
 
 # Step 8: Wait for synchronization to occur
 echo "Waiting for synchronization to occur..."
-sleep 15 # Give more time for synchronization to complete
+sleep 5 # Give more time for synchronization to complete
 
 # Step 9: Verify file exists in client2's sync_dir
 echo "Verifying file exists in client2's sync_dir..."
-if docker exec -i client2 sh -c "test -f /app/client/sync_dir_${TEST_USER}/${TEST_FILENAME}"; then
+if docker exec -i client2 sh -c "test -f ${TEST_FILE_PATH}"; then
     echo -e "${GREEN}[PASSED]${NC} File found in client2's sync_dir"
     
     # Verify file content in client2
-    CLIENT2_CONTENT=$(docker exec -i client2 sh -c "cat /app/client/sync_dir_${TEST_USER}/${TEST_FILENAME}")
+    CLIENT2_CONTENT=$(docker exec -i client2 sh -c "cat ${TEST_FILE_PATH}")
     if [ "$CLIENT2_CONTENT" = "$TEST_CONTENT" ]; then
         echo -e "${GREEN}[PASSED]${NC} File content in client2 matches original"
     else
@@ -144,10 +168,10 @@ fi
 
 # Step 11: List files in both sync_dirs and server for debugging
 echo -e "\nListing files in client1's sync_dir:"
-docker exec -i client1 sh -c "ls -la /app/client/sync_dir_${TEST_USER}/"
+docker exec -i client1 sh -c "ls -la ${SYNC_DIR_PATH}/"
 
 echo -e "\nListing files in client2's sync_dir:"
-docker exec -i client2 sh -c "ls -la /app/client/sync_dir_${TEST_USER}/"
+docker exec -i client2 sh -c "ls -la ${SYNC_DIR_PATH}/"
 
 echo -e "\nListing files on server:"
 docker exec -i server sh -c "ls -la /app/server/files/sync_dir_${TEST_USER}/"
