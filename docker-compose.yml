@@ -12,20 +12,21 @@ services:
       - "8090:8080"
     networks:
       - dropbox_network
+    command: ["./server/server", "8080"]
     healthcheck:
       test: ["CMD", "nc", "-z", "localhost", "8080"]
       interval: 10s
       timeout: 5s
       retries: 3
 
-  client:
+  client1:
     build:
       context: .
       dockerfile: Dockerfile.client
-    container_name: client
+    container_name: client1
     volumes:
-      - client_data:/app/client/sync_dir
-      - ./logs:/app/logs
+      - client1_data:/app/client/sync_dir_testuser
+      - ./logs:/app/logs/client1
     stdin_open: true
     tty: true
     depends_on:
@@ -33,11 +34,31 @@ services:
         condition: service_healthy
     networks:
       - dropbox_network
+    # Client needs manual startup with: ./client/client testuser server 8080
+    command: ["/bin/bash"]
+
+  client2:
+    build:
+      context: .
+      dockerfile: Dockerfile.client
+    container_name: client2
+    volumes:
+      - client2_data:/app/client/sync_dir_testuser
+      - ./logs:/app/logs/client2
+    stdin_open: true
+    tty: true
+    depends_on:
+      server:
+        condition: service_healthy
+    networks:
+      - dropbox_network
+    # Client needs manual startup with: ./client/client testuser server 8080
     command: ["/bin/bash"]
 
 volumes:
   server_data:
-  client_data:
+  client1_data:
+  client2_data:
 
 networks:
   dropbox_network:
