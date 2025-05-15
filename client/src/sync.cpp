@@ -1,5 +1,6 @@
 #include "sync.h"
 #include "socket_utils.h"
+#include "common.h"
 #include "packet.h"  // Explicit include to guarantee visibility of struct packet
 #include <cstdio>
 #include <cstring>
@@ -126,8 +127,10 @@ bool sync_start(const char* username, const char* server_ip, int port) {
     g_server_ip = server_ip;
     g_server_port = port;
 
-    if (connect_socket(server_socket, server_ip, port) < 0) {
-        perror("Erro ao conectar ao servidor");
+    int err = connect_socket(server_socket, server_ip, port);
+    if (err < 0) {
+        // perror("Erro ao conectar ao servidor");
+        DEBUG_PRINTF("Error ao conectar ao sevidor, err: %d\n", err);
         return false;
     }
 
@@ -156,20 +159,20 @@ bool sync_start(const char* username, const char* server_ip, int port) {
     strcpy(login_pkt.payload, username);
     login_pkt.length = strlen(username);
 
-    printf("DEBUG: Sending login packet with seq: %d, type: %d, length: %d\n",
+    DEBUG_PRINTF("DEBUG: Sending login packet with seq: %d, type: %d, length: %d\n",
            login_pkt.seqn, login_pkt.type, login_pkt.length);
-    printf("DEBUG: Packet size: %zu bytes\n", sizeof(packet));
+    DEBUG_PRINTF("DEBUG: Packet size: %zu bytes\n", sizeof(packet));
 
     // Use direct socket send for login packet
     {
         std::lock_guard<std::mutex> lock(socket_mutex);
         ssize_t bytes_sent = send(server_socket, &login_pkt, sizeof(packet), 0);
         if (bytes_sent <= 0) {
-            printf("ERROR: Failed to send login packet: %s\n", strerror(errno));
+            DEBUG_PRINTF("ERROR: Failed to send login packet: %s\n", strerror(errno));
             close(server_socket);
             return false;
         }
-        printf("DEBUG: Sent %zd bytes directly via socket\n", bytes_sent);
+        DEBUG_PRINTF("DEBUG: Sent %zd bytes directly via socket\n", bytes_sent);
     }
 
     // Wait for server response using direct socket operations
@@ -178,23 +181,23 @@ bool sync_start(const char* username, const char* server_ip, int port) {
 
     {
         std::lock_guard<std::mutex> lock(socket_mutex);
-        printf("DEBUG: Waiting for login response...\n");
+        DEBUG_PRINTF("DEBUG: Waiting for login response...\n");
         ssize_t bytes_received = recv(server_socket, &response, sizeof(packet), MSG_WAITALL);
         if (bytes_received <= 0) {
-            printf("ERROR: Failed to receive login response: %s\n", strerror(errno));
+            DEBUG_PRINTF("ERROR: Failed to receive login response: %s\n", strerror(errno));
             close(server_socket);
             return false;
         }
-        printf("DEBUG: Received %zd bytes login response\n", bytes_received);
+        DEBUG_PRINTF("DEBUG: Received %zd bytes login response\n", bytes_received);
     }
 
-    printf("DEBUG: Received login response with seq: %d, type: %d\n", response.seqn, response.type);
+    DEBUG_PRINTF("DEBUG: Received login response with seq: %d, type: %d\n", response.seqn, response.type);
 
     if (response.type == CMD_LOGIN) {
         printf("Login bem-sucedido.\n");
 
         // Initialize sync (Initial sync handshake)
-        printf("Realizando sincronização inicial...\n");
+        DEBUG_PRINTF("Realizando sincronização inicial...\n");
         get_sync_dir();
         printf("Sincronização inicial concluída.\n");
 
@@ -370,7 +373,7 @@ void monitor_server_notifications() {
     uint16_t expected_seqn = 0;
     size_t files_remaining = 0;
 
-    printf("DEBUG Monitor: Thread starting\n");
+    DEBUG_PRINTF("DEBUG Monitor: Thread starting\n");
 
     // Signal that the monitor thread is ready
     {
@@ -379,7 +382,7 @@ void monitor_server_notifications() {
         monitor_ready_cv.notify_all();
     }
 
-    printf("DEBUG Monitor: Thread ready - waiting for packets\n");
+    DEBUG_PRINTF("DEBUG Monitor: Thread ready - waiting for packets\n");
 
     while (true) {
         // Wait for notifications from the server
@@ -390,40 +393,42 @@ void monitor_server_notifications() {
             std::lock_guard<std::mutex> lock(socket_mutex);
             size_t bytes_read = read_all(server_socket, &pkt, sizeof(packet));
             if (bytes_read != sizeof(packet)) {
-                printf("ERROR: Lost connection to server (read %zu of %zu).\n",
+                DEBUG_PRINTF("ERROR: Lost connection to server (read %zu of %zu).\n",
                        bytes_read, sizeof(packet));
                 connection_alive.store(false);
                 break; // Exit monitor thread; other threads will notice connection loss
             }
         }
 
-        printf("DEBUG Monitor: Received packet type: %d, seq: %d, length: %d, payload: %.10s...\n",
-               pkt.type, pkt.seqn, pkt.length, pkt.payload);
+        if (pkt.length != 0) {
+            DEBUG_PRINTF("DEBUG Monitor: Received packet type: %d, seq: %d, length: %d, payload: %.10s...\n",
+                   pkt.type, pkt.seqn, pkt.length, pkt.payload);
+        }
 
         // Handle the packet based on its type
         if (pkt.type == SYNC_NOTIFICATION) {
-            printf("DEBUG Monitor: Processing sync notification\n");
+            DEBUG_PRINTF("DEBUG Monitor: Processing sync notification\n");
 
             // Check if this is part of a get_sync_dir response
             if (command_completed && files_remaining > 0) {
                 files_remaining--;
-                printf("DEBUG Monitor: Processing sync dir file (%zu remaining)\n", files_remaining);
+                DEBUG_PRINTF("DEBUG Monitor: Processing sync dir file (%zu remaining)\n", files_remaining);
 
                 if (files_remaining == 0) {
                     // Signal that the get_sync_dir command is fully complete
                     command_completed = false;
-                    printf("DEBUG Monitor: All sync dir files processed\n");
+                    DEBUG_PRINTF("DEBUG Monitor: All sync dir files processed\n");
                 }
                 // Process the file notification regardless
                 handle_server_notification(pkt);
             } else {
                 // It's a standalone sync notification from another device
-                printf("DEBUG Monitor: Processing notification from another device\n");
+                DEBUG_PRINTF("DEBUG Monitor: Processing notification from another device\n");
                 handle_server_notification(pkt);
             }
-        } else {
-            // It's a response to a command
-            printf("DEBUG Monitor: Received command response, adding to responses map\n");
+        }
+        else { // It's a response to a command
+            // DEBUG_PRINTF("DEBUG Monitor: Received command response, adding to responses map\n");
 
             // Special handling for get_sync_dir
             if (pkt.type == CMD_GET_SYNC_DIR) {
@@ -432,12 +437,12 @@ void monitor_server_notifications() {
                     command_completed = true;
                     files_remaining = pkt.total_size;
                     expected_seqn = pkt.seqn;
-                    printf("DEBUG Monitor: get_sync_dir response OK, expecting %zu files\n", files_remaining);
+                    DEBUG_PRINTF("DEBUG Monitor: get_sync_dir response OK, expecting %zu files\n", files_remaining);
 
                     // If no files to sync, mark command as done immediately
                     if (files_remaining == 0) {
                         command_completed = false;
-                        printf("DEBUG Monitor: No files to sync, command completed\n");
+                        DEBUG_PRINTF("DEBUG Monitor: No files to sync, command completed\n");
                     }
                 }
             }
@@ -446,8 +451,8 @@ void monitor_server_notifications() {
             {
                 std::lock_guard<std::mutex> lock(responses_mutex);
                 responses[pkt.seqn] = pkt;
-                printf("DEBUG Monitor: Added response for seq %d to map (map size: %zu)\n",
-                       pkt.seqn, responses.size());
+                DEBUG_PRINTF("DEBUG Monitor: Added response for seq %d to map (map size: %zu)\n",
+                      pkt.seqn, responses.size());
                 responses_cv.notify_all();
             }
         }
@@ -455,7 +460,7 @@ void monitor_server_notifications() {
 }
 
 void handle_server_notification(packet& pkt) {
-    printf("DEBUG: Handling server notification type %d\n", pkt.type);
+    DEBUG_PRINTF("DEBUG: Handling server notification type %d\n", pkt.type);
 
     // Lock file operations during handling
     std::lock_guard<std::mutex> lock(file_mutex);
@@ -471,12 +476,12 @@ void handle_server_notification(packet& pkt) {
             std::string filename = payload_str.substr(delimiter_pos + 1);
             std::string full_path = sync_dir_path + "/" + filename;
 
-            printf("DEBUG: Received notification - Action: %c, File: %s\n", action, filename.c_str());
+            DEBUG_PRINTF("DEBUG: Received notification - Action: %c, File: %s\n", action, filename.c_str());
 
             if (action == 'U') {
                 // Request download from server
-                printf("Atualização detectada no servidor para %s. Baixando...\n", filename.c_str());
-                
+                DEBUG_PRINTF("Atualização detectada no servidor para %s. Baixando...\n", filename.c_str());
+
                 // Create download request
                 packet download_req;
                 memset(&download_req, 0, sizeof(packet));
@@ -489,75 +494,75 @@ void handle_server_notification(packet& pkt) {
                 {
                     std::lock_guard<std::mutex> sock_lock(socket_mutex);
                     if (write_all(server_socket, &download_req, sizeof(packet)) != sizeof(packet)) {
-                         printf("ERROR: Failed to send download request for notification %s\n", filename.c_str());
+                         DEBUG_PRINTF("ERROR: Failed to send download request for notification %s\n", filename.c_str());
                          return;
                     }
-                    
+
                     // Wait for server response
                     packet response;
                     memset(&response, 0, sizeof(packet));
                     if (read_all(server_socket, &response, sizeof(packet)) != sizeof(packet)) {
-                        printf("ERROR: Failed to receive download response\n");
+                        DEBUG_PRINTF("ERROR: Failed to receive download response\n");
                         return;
                     }
-                    
+
                     if (strcmp(response.payload, "OK") != 0) {
-                        printf("ERROR: Server returned error for download: %s\n", response.payload);
+                        DEBUG_PRINTF("ERROR: Server returned error for download: %s\n", response.payload);
                         return;
                     }
-                    
+
                     // Prepare to receive file data
                     size_t fileSize = response.total_size;
-                    printf("DEBUG: Receiving file %s (%zu bytes) via notification handler\n", filename.c_str(), fileSize);
-                    
+                    DEBUG_PRINTF("DEBUG: Receiving file %s (%zu bytes) via notification handler\n", filename.c_str(), fileSize);
+
                     // Allocate buffer for file data
                     char* fileData = new char[fileSize];
                     size_t bytesRead = 0;
-                    
+
                     // Receive file data packets
                     while (bytesRead < fileSize) {
                         packet dataPkt;
                         memset(&dataPkt, 0, sizeof(packet));
-                        
+
                         if (read_all(server_socket, &dataPkt, sizeof(packet)) != sizeof(packet)) {
-                            printf("ERROR: Failed to receive file data packet\n");
+                            DEBUG_PRINTF("ERROR: Failed to receive file data packet\n");
                             delete[] fileData;
                             return;
                         }
-                        
+
                         if (dataPkt.type != DATA_PACKET) {
-                            printf("ERROR: Expected DATA_PACKET but got type %d\n", dataPkt.type);
+                            DEBUG_PRINTF("ERROR: Expected DATA_PACKET but got type %d\n", dataPkt.type);
                             delete[] fileData;
                             return;
                         }
-                        
+
                         memcpy(fileData + bytesRead, dataPkt.payload, dataPkt.length);
                         bytesRead += dataPkt.length;
-                        printf("DEBUG: Download progress: %zu/%zu bytes (%d%%)\n",
+                        DEBUG_PRINTF("DEBUG: Download progress: %zu/%zu bytes (%d%%)\n",
                                bytesRead, fileSize, (int)(bytesRead * 100 / fileSize));
                     }
-                    
+
                     // Write file to sync directory
                     std::ofstream file(full_path, std::ios::binary);
                     if (!file) {
-                        printf("ERROR: Failed to create file %s\n", full_path.c_str());
+                        DEBUG_PRINTF("ERROR: Failed to create file %s\n", full_path.c_str());
                         delete[] fileData;
                         return;
                     }
-                    
+
                     file.write(fileData, fileSize);
                     file.close();
                     delete[] fileData;
-                    
+
                     // Update file times map
                     struct stat st;
                     if (stat(full_path.c_str(), &st) == 0) {
                         file_mtimes[filename] = st.st_mtime;
                     }
-                    
+
                     printf("Arquivo %s baixado com sucesso via notificação.\n", filename.c_str());
                 } // Release socket lock
-                
+
             } else if (action == 'D') {
                 // Delete the file locally
                 printf("Arquivo %s removido no servidor. Removendo localmente...\n", filename.c_str());
@@ -573,10 +578,10 @@ void handle_server_notification(packet& pkt) {
                 }
             }
         } else {
-            printf("ERROR: Invalid notification format: %s\n", payload_str.c_str());
+            DEBUG_PRINTF("ERROR: Invalid notification format: %s\n", payload_str.c_str());
         }
     } else {
-         printf("WARN: Received unexpected packet type %d in handle_server_notification\n", pkt.type);
+         DEBUG_PRINTF("WARN: Received unexpected packet type %d in handle_server_notification\n", pkt.type);
     }
     // Mutex automatically released when lock goes out of scope
 }
@@ -584,14 +589,14 @@ void handle_server_notification(packet& pkt) {
 bool upload_file(const std::string& filepath) {
     // Check socket status first
     if (!check_socket_status()) {
-        printf("ERROR: Socket is in invalid state. Cannot send upload command.\n");
+        DEBUG_PRINTF("ERROR: Socket is in invalid state. Cannot send upload command.\n");
         return false;
     }
 
     // Get just the filename from the path
     std::string filename = fs::path(filepath).filename().string();
 
-    printf("DEBUG: Attempting to upload file: %s\n", filepath.c_str());
+    DEBUG_PRINTF("DEBUG: Attempting to upload file: %s\n", filepath.c_str());
 
     // Check if file exists
     if (!fs::exists(filepath)) {
@@ -599,7 +604,7 @@ bool upload_file(const std::string& filepath) {
         return false;
     }
 
-    printf("DEBUG: File exists, opening...\n");
+    DEBUG_PRINTF("DEBUG: File exists, opening...\n");
 
     // Open the file
     std::ifstream file(filepath, std::ios::binary | std::ios::ate);
@@ -612,14 +617,14 @@ bool upload_file(const std::string& filepath) {
     size_t fileSize = file.tellg();
     file.seekg(0, std::ios::beg);
 
-    printf("DEBUG: File size: %zu bytes\n", fileSize);
+    DEBUG_PRINTF("DEBUG: File size: %zu bytes\n", fileSize);
 
     // Read file content
     char* fileData = new char[fileSize];
     file.read(fileData, fileSize);
     file.close();
 
-    printf("DEBUG: File read into memory\n");
+    DEBUG_PRINTF("DEBUG: File read into memory\n");
 
     // Send upload command
     packet cmd;
@@ -630,7 +635,7 @@ bool upload_file(const std::string& filepath) {
     strcpy(cmd.payload, filename.c_str());
     cmd.length = filename.length();
 
-    printf("DEBUG: Sending upload command packet for file: %s, size: %zu\n",
+    DEBUG_PRINTF("DEBUG: Sending upload command packet for file: %s, size: %zu\n",
            filename.c_str(), fileSize);
 
     // Send the command
@@ -638,14 +643,14 @@ bool upload_file(const std::string& filepath) {
         std::lock_guard<std::mutex> lock(socket_mutex);
         ssize_t bytes_sent = send(server_socket, &cmd, sizeof(packet), 0);
         if (bytes_sent <= 0) {
-            printf("ERROR: Failed to send upload command: %s\n", strerror(errno));
+            DEBUG_PRINTF("ERROR: Failed to send upload command: %s\n", strerror(errno));
             delete[] fileData;
             return false;
         }
-        printf("DEBUG: Sent %zd bytes (upload command)\n", bytes_sent);
+        DEBUG_PRINTF("DEBUG: Sent %zd bytes (upload command)\n", bytes_sent);
     }
 
-    printf("DEBUG: Upload command sent, sending file data...\n");
+    DEBUG_PRINTF("DEBUG: Upload command sent, sending file data...\n");
 
     // Send file data in chunks
     size_t bytesSent = 0;
@@ -659,27 +664,27 @@ bool upload_file(const std::string& filepath) {
         memcpy(dataPkt.payload, fileData + bytesSent, bytesToSend);
         dataPkt.length = bytesToSend;
 
-        printf("DEBUG: Sending data packet %d, bytes: %zu\n", dataPkt.seqn, bytesToSend);
+        DEBUG_PRINTF("DEBUG: Sending data packet %d, bytes: %zu\n", dataPkt.seqn, bytesToSend);
 
         {
             std::lock_guard<std::mutex> lock(socket_mutex);
             ssize_t bytes_sent = send(server_socket, &dataPkt, sizeof(packet), 0);
             if (bytes_sent <= 0) {
-                printf("ERROR: Failed to send file data: %s\n", strerror(errno));
+                DEBUG_PRINTF("ERROR: Failed to send file data: %s\n", strerror(errno));
                 delete[] fileData;
                 return false;
             }
-            printf("DEBUG: Sent %zd bytes (data packet)\n", bytes_sent);
+            DEBUG_PRINTF("DEBUG: Sent %zd bytes (data packet)\n", bytes_sent);
         }
 
         bytesSent += bytesToSend;
-        printf("DEBUG: Progress: %zu/%zu bytes sent (%d%%)\n",
+        DEBUG_PRINTF("DEBUG: Progress: %zu/%zu bytes sent (%d%%)\n",
                bytesSent, fileSize, (int)(bytesSent * 100 / fileSize));
     }
 
     delete[] fileData;
 
-    printf("DEBUG: All file data sent, waiting for server response...\n");
+    DEBUG_PRINTF("DEBUG: All file data sent, waiting for server response...\n");
 
     // Receive server response directly
     packet response;
@@ -687,35 +692,35 @@ bool upload_file(const std::string& filepath) {
 
     {
         std::lock_guard<std::mutex> lock(socket_mutex);
-        printf("DEBUG: Waiting for upload response...\n");
+        DEBUG_PRINTF("DEBUG: Waiting for upload response...\n");
         ssize_t recv_bytes = recv(server_socket, &response, sizeof(packet), MSG_WAITALL);
         if (recv_bytes <= 0) {
-            printf("ERROR: Failed to receive upload response: %s\n", strerror(errno));
+            DEBUG_PRINTF("ERROR: Failed to receive upload response: %s\n", strerror(errno));
             return false;
         }
-        printf("DEBUG: Received %zd bytes upload response\n", recv_bytes);
+        DEBUG_PRINTF("DEBUG: Received %zd bytes upload response\n", recv_bytes);
     }
 
-    printf("DEBUG: Received upload response: %s\n", response.payload);
+    DEBUG_PRINTF("DEBUG: Received upload response: %s\n", response.payload);
 
     if (strcmp(response.payload, "OK") == 0) {
         printf("Arquivo '%s' enviado com sucesso.\n", filename.c_str());
 
         // Check if file was copied to sync directory
         std::string syncPath = sync_dir_path + "/" + filename;
-        printf("DEBUG: Checking if file was copied to sync directory: %s\n", syncPath.c_str());
+        DEBUG_PRINTF("DEBUG: Checking if file was copied to sync directory: %s\n", syncPath.c_str());
 
         if (fs::exists(syncPath)) {
-            printf("DEBUG: File exists in sync directory\n");
+            DEBUG_PRINTF("DEBUG: File exists in sync directory\n");
         } else {
-            printf("DEBUG: File does NOT exist in sync directory\n");
+            DEBUG_PRINTF("DEBUG: File does NOT exist in sync directory\n");
 
             // Try to copy the file to sync directory if it's not there
             try {
                 fs::copy_file(filepath, syncPath, fs::copy_options::overwrite_existing);
-                printf("DEBUG: Manually copied file to sync directory\n");
+                DEBUG_PRINTF("DEBUG: Manually copied file to sync directory\n");
             } catch (const std::exception& e) {
-                printf("DEBUG: Error copying file to sync directory: %s\n", e.what());
+                DEBUG_PRINTF("DEBUG: Error copying file to sync directory: %s\n", e.what());
             }
         }
 
@@ -723,18 +728,18 @@ bool upload_file(const std::string& filepath) {
     } else if (response.type == SYNC_NOTIFICATION || strncmp(response.payload, "U:", 2) == 0) {
         // This is a notification, not an error
         printf("Arquivo '%s' enviado com sucesso. (Notificação recebida)\n", filename.c_str());
-        
+
         // Make sure the file is in the sync directory
         std::string syncPath = sync_dir_path + "/" + filename;
         if (!fs::exists(syncPath)) {
             try {
                 fs::copy_file(filepath, syncPath, fs::copy_options::overwrite_existing);
-                printf("DEBUG: Copied file to sync directory after notification\n");
+                DEBUG_PRINTF("DEBUG: Copied file to sync directory after notification\n");
             } catch (const std::exception& e) {
-                printf("DEBUG: Error copying file to sync directory: %s\n", e.what());
+                DEBUG_PRINTF("DEBUG: Error copying file to sync directory: %s\n", e.what());
             }
         }
-        
+
         return true;
     } else {
         printf("Erro ao enviar arquivo: %s\n", response.payload);
@@ -745,7 +750,7 @@ bool upload_file(const std::string& filepath) {
 bool download_file(const std::string& filename) {
     // Check socket status first
     if (!check_socket_status()) {
-        printf("ERROR: Socket is in invalid state. Cannot send download command.\n");
+        DEBUG_PRINTF("ERROR: Socket is in invalid state. Cannot send download command.\n");
         return false;
     }
 
@@ -761,16 +766,16 @@ bool download_file(const std::string& filename) {
     strcpy(cmd.payload, filename.c_str());
     cmd.length = filename.length();
 
-    printf("DEBUG: Sending download command for file: %s with seq: %d\n", filename.c_str(), cmd.seqn);
+    DEBUG_PRINTF("DEBUG: Sending download command for file: %s with seq: %d\n", filename.c_str(), cmd.seqn);
 
     {
         std::lock_guard<std::mutex> lock(socket_mutex);
         ssize_t bytes_sent = send(server_socket, &cmd, sizeof(packet), 0);
         if (bytes_sent <= 0) {
-            printf("ERROR: Failed to send download command: %s\n", strerror(errno));
+            DEBUG_PRINTF("ERROR: Failed to send download command: %s\n", strerror(errno));
             return false;
         }
-        printf("DEBUG: Sent %zd bytes (download command)\n", bytes_sent);
+        DEBUG_PRINTF("DEBUG: Sent %zd bytes (download command)\n", bytes_sent);
     }
 
     // Receive server response directly
@@ -779,16 +784,16 @@ bool download_file(const std::string& filename) {
 
     {
         std::lock_guard<std::mutex> lock(socket_mutex);
-        printf("DEBUG: Waiting for download response...\n");
+        DEBUG_PRINTF("DEBUG: Waiting for download response...\n");
         ssize_t recv_bytes = recv(server_socket, &response, sizeof(packet), MSG_WAITALL);
         if (recv_bytes <= 0) {
-            printf("ERROR: Failed to receive download response: %s\n", strerror(errno));
+            DEBUG_PRINTF("ERROR: Failed to receive download response: %s\n", strerror(errno));
             return false;
         }
-        printf("DEBUG: Received %zd bytes download response\n", recv_bytes);
+        DEBUG_PRINTF("DEBUG: Received %zd bytes download response\n", recv_bytes);
     }
 
-    printf("DEBUG: Received download response: %s with seq: %d\n", response.payload, response.seqn);
+    DEBUG_PRINTF("DEBUG: Received download response: %s with seq: %d\n", response.payload, response.seqn);
 
     if (strcmp(response.payload, "OK") != 0) {
         printf("Erro ao baixar arquivo: %s\n", response.payload);
@@ -800,7 +805,7 @@ bool download_file(const std::string& filename) {
     char* fileData = new char[fileSize];
     size_t bytesRead = 0;
 
-    printf("DEBUG: Expecting file of size: %zu bytes\n", fileSize);
+    DEBUG_PRINTF("DEBUG: Expecting file of size: %zu bytes\n", fileSize);
 
     // Receive file data packets directly
     while (bytesRead < fileSize) {
@@ -809,17 +814,17 @@ bool download_file(const std::string& filename) {
 
         {
             std::lock_guard<std::mutex> lock(socket_mutex);
-            ssize_t recv_bytes = recv(server_socket, &dataPkt, sizeof(packet), MSG_WAITALL);
+            ssize_t recv_bytes = read_all(server_socket, &dataPkt, sizeof(packet));
             if (recv_bytes <= 0) {
-                printf("ERROR: Failed to receive file data: %s\n", strerror(errno));
+                DEBUG_PRINTF("ERROR: Failed to receive file data: %s\n", strerror(errno));
                 delete[] fileData;
                 return false;
             }
-            printf("DEBUG: Received data packet with %zd bytes\n", recv_bytes);
+            DEBUG_PRINTF("DEBUG: Received data packet with %zd bytes\n", recv_bytes);
         }
 
         if (dataPkt.type != DATA_PACKET) {
-            printf("ERROR: Unexpected packet type %d (expected DATA_PACKET)\n", dataPkt.type);
+            DEBUG_PRINTF("ERROR: Unexpected packet type %d (expected DATA_PACKET)\n", dataPkt.type);
             delete[] fileData;
             return false;
         }
@@ -827,11 +832,11 @@ bool download_file(const std::string& filename) {
         memcpy(fileData + bytesRead, dataPkt.payload, dataPkt.length);
         bytesRead += dataPkt.length;
 
-        printf("DEBUG: Download progress: %zu/%zu bytes (%d%%)\n",
+        DEBUG_PRINTF("DEBUG: Download progress: %zu/%zu bytes (%d%%)\n",
                bytesRead, fileSize, (int)(bytesRead * 100 / fileSize));
     }
 
-    printf("DEBUG: All file data received, saving to: %s\n", destPath.c_str());
+    DEBUG_PRINTF("DEBUG: All file data received, saving to: %s\n", destPath.c_str());
 
     // Save file
     std::ofstream file(destPath, std::ios::binary);
@@ -852,13 +857,13 @@ bool download_file(const std::string& filename) {
 bool delete_file(const std::string& filename) {
     // Check socket status first
     if (!check_socket_status()) {
-        printf("ERROR: Socket is in invalid state. Attempting to reset connection...\n");
+        DEBUG_PRINTF("ERROR: Socket is in invalid state. Attempting to reset connection...\n");
         if (!reset_socket_connection()) {
-            printf("ERROR: Failed to reset connection. Cannot delete file.\n");
+            DEBUG_PRINTF("ERROR: Failed to reset connection. Cannot delete file.\n");
             return false;
         }
     }
-    
+
     // Track our operation with unique sequence number
     uint16_t delete_seq = get_next_seq();
 
@@ -871,17 +876,17 @@ bool delete_file(const std::string& filename) {
     strcpy(cmd.payload, filename.c_str());
     cmd.length = strlen(filename.c_str());
 
-    printf("DEBUG: [DELETE] Sending command for file: %s with seq: %d\n", filename.c_str(), delete_seq);
+    DEBUG_PRINTF("DEBUG: [DELETE] Sending command for file: %s with seq: %d\n", filename.c_str(), delete_seq);
 
     // First check if we need to clear socket buffer
     int bytes_available = 0;
     if (ioctl(server_socket, FIONREAD, &bytes_available) == 0) {
         if (bytes_available > 0) {
-            printf("WARNING: [DELETE] Socket has %d bytes of pending data, protocol desync detected\n", 
+            DEBUG_PRINTF("WARNING: [DELETE] Socket has %d bytes of pending data, protocol desync detected\n",
                    bytes_available);
-            printf("WARNING: [DELETE] Resetting connection to ensure clean state\n");
+            DEBUG_PRINTF("WARNING: [DELETE] Resetting connection to ensure clean state\n");
             if (!reset_socket_connection()) {
-                printf("ERROR: [DELETE] Failed to reset connection. Cannot delete file.\n");
+                DEBUG_PRINTF("ERROR: [DELETE] Failed to reset connection. Cannot delete file.\n");
                 return false;
             }
         }
@@ -892,10 +897,10 @@ bool delete_file(const std::string& filename) {
         std::lock_guard<std::mutex> lock(socket_mutex);
         ssize_t bytes_sent = send(server_socket, &cmd, sizeof(packet), 0);
         if (bytes_sent <= 0) {
-            printf("ERROR: [DELETE] Failed to send command: %s\n", strerror(errno));
+            DEBUG_PRINTF("ERROR: [DELETE] Failed to send command: %s\n", strerror(errno));
             return false;
         }
-        printf("DEBUG: [DELETE] Sent %zd bytes (delete command)\n", bytes_sent);
+        DEBUG_PRINTF("DEBUG: [DELETE] Sent %zd bytes (delete command)\n", bytes_sent);
     }
 
     // Receive response with shorter timeout
@@ -904,52 +909,52 @@ bool delete_file(const std::string& filename) {
 
     {
         std::lock_guard<std::mutex> lock(socket_mutex);
-        printf("DEBUG: [DELETE] Waiting for response...\n");
-        
+        DEBUG_PRINTF("DEBUG: [DELETE] Waiting for response...\n");
+
         // Set a shorter timeout for this operation
         struct timeval short_timeout;
         short_timeout.tv_sec = 5;
         short_timeout.tv_usec = 0;
         setsockopt(server_socket, SOL_SOCKET, SO_RCVTIMEO, &short_timeout, sizeof(short_timeout));
-        
+
         // Receive with timeout
         ssize_t recv_bytes = recv(server_socket, &response, sizeof(packet), MSG_WAITALL);
-        
+
         // Reset timeout to default
         struct timeval default_timeout;
         default_timeout.tv_sec = 10;
         default_timeout.tv_usec = 0;
         setsockopt(server_socket, SOL_SOCKET, SO_RCVTIMEO, &default_timeout, sizeof(default_timeout));
-        
+
         if (recv_bytes <= 0) {
-            printf("ERROR: [DELETE] Failed to receive response: %s\n", strerror(errno));
+            DEBUG_PRINTF("ERROR: [DELETE] Failed to receive response: %s\n", strerror(errno));
             // Try to reset connection on timeout
             if (errno == EAGAIN || errno == EWOULDBLOCK) {
-                printf("WARNING: [DELETE] Response timeout, attempting to reset connection\n");
+                DEBUG_PRINTF("WARNING: [DELETE] Response timeout, attempting to reset connection\n");
                 reset_socket_connection();
             }
             return false;
         }
-        printf("DEBUG: [DELETE] Received %zd bytes response\n", recv_bytes);
+        DEBUG_PRINTF("DEBUG: [DELETE] Received %zd bytes response\n", recv_bytes);
     }
 
     // Validate response packet
-    printf("DEBUG: [DELETE] Response: type=%d, seq=%d, length=%d, payload='%s'\n",
+    DEBUG_PRINTF("DEBUG: [DELETE] Response: type=%d, seq=%d, length=%d, payload='%s'\n",
            response.type, response.seqn, response.length, response.payload);
-    
+
     // Strict validation of response
     if (response.type != CMD_DELETE) {
-        printf("ERROR: [DELETE] Invalid response type: %d (expected %d)\n", 
+        DEBUG_PRINTF("ERROR: [DELETE] Invalid response type: %d (expected %d)\n",
                response.type, CMD_DELETE);
-        printf("WARNING: [DELETE] Protocol desync detected, resetting connection\n");
+        DEBUG_PRINTF("WARNING: [DELETE] Protocol desync detected, resetting connection\n");
         reset_socket_connection();
         return false;
     }
-    
+
     if (response.seqn != delete_seq) {
-        printf("ERROR: [DELETE] Sequence number mismatch: %d (expected %d)\n", 
+        DEBUG_PRINTF("ERROR: [DELETE] Sequence number mismatch: %d (expected %d)\n",
                response.seqn, delete_seq);
-        printf("WARNING: [DELETE] Protocol desync detected, resetting connection\n");
+        DEBUG_PRINTF("WARNING: [DELETE] Protocol desync detected, resetting connection\n");
         reset_socket_connection();
         return false;
     }
@@ -963,14 +968,14 @@ bool delete_file(const std::string& filename) {
         if (fs::exists(localPath)) {
             try {
                 fs::remove(localPath);
-                printf("DEBUG: [DELETE] Removed local file: %s\n", localPath.c_str());
+                DEBUG_PRINTF("DEBUG: [DELETE] Removed local file: %s\n", localPath.c_str());
 
                 // Update mtimes
                 file_mutex.lock();
                 file_mtimes.erase(filename);
                 file_mutex.unlock();
             } catch (const std::exception& e) {
-                printf("DEBUG: [DELETE] Error removing local file: %s\n", e.what());
+                DEBUG_PRINTF("DEBUG: [DELETE] Error removing local file: %s\n", e.what());
             }
         }
 
@@ -987,7 +992,7 @@ bool delete_file(const std::string& filename) {
 // Helper function to check socket status
 bool check_socket_status() {
     if (!connection_alive.load()) {
-        printf("ERROR: Connection to server lost.\n");
+        DEBUG_PRINTF("ERROR: Connection to server lost.\n");
         return false;
     }
 
@@ -996,12 +1001,12 @@ bool check_socket_status() {
     int retval = getsockopt(server_socket, SOL_SOCKET, SO_ERROR, &error, &len);
 
     if (retval != 0) {
-        printf("ERROR: getsockopt failed with error: %d\n", retval);
+        DEBUG_PRINTF("ERROR: getsockopt failed with error: %d\n", retval);
         return false;
     }
 
     if (error != 0) {
-        printf("ERROR: Socket error: %d\n", error);
+        DEBUG_PRINTF("ERROR: Socket error: %d\n", error);
         return false;
     }
 
@@ -1011,9 +1016,9 @@ bool check_socket_status() {
 void list_server_files() {
     // Check socket status
     if (!check_socket_status()) {
-        printf("ERROR: Socket is in invalid state before sending list_server command. Attempting reset...\n");
+        DEBUG_PRINTF("ERROR: Socket is in invalid state before sending list_server command. Attempting reset...\n");
         if (!reset_socket_connection()) {
-            printf("ERROR: Failed to reset connection. Cannot list server files.\n");
+            DEBUG_PRINTF("ERROR: Failed to reset connection. Cannot list server files.\n");
             return;
         }
     }
@@ -1021,11 +1026,11 @@ void list_server_files() {
     // Check for pending data that would indicate protocol desync
     int bytes_available = 0;
     if (ioctl(server_socket, FIONREAD, &bytes_available) == 0 && bytes_available > 0) {
-        printf("WARNING: [LIST] Socket has %d bytes of pending data, protocol desync detected\n", 
+        DEBUG_PRINTF("WARNING: [LIST] Socket has %d bytes of pending data, protocol desync detected\n",
                bytes_available);
-        printf("WARNING: [LIST] Resetting connection to ensure clean state\n");
+        DEBUG_PRINTF("WARNING: [LIST] Resetting connection to ensure clean state\n");
         if (!reset_socket_connection()) {
-            printf("ERROR: [LIST] Failed to reset connection. Cannot list server files.\n");
+            DEBUG_PRINTF("ERROR: [LIST] Failed to reset connection. Cannot list server files.\n");
             return;
         }
     }
@@ -1038,26 +1043,26 @@ void list_server_files() {
     cmd.total_size = 0;
     cmd.length = 0;
 
-    printf("DEBUG: [LIST] Sending list_server command with seq: %d\n", cmd.seqn);
+    DEBUG_PRINTF("DEBUG: [LIST] Sending list_server command with seq: %d\n", cmd.seqn);
     uint16_t expected_seq = cmd.seqn; // Store for validation
 
     // Send with exclusive lock
     ssize_t bytes_sent;
     {
         std::lock_guard<std::mutex> lock(socket_mutex);
-        bytes_sent = send(server_socket, &cmd, sizeof(packet), 0);
+        bytes_sent = write_all(server_socket, &cmd, sizeof(packet));
         if (bytes_sent <= 0) {
-            printf("ERROR: [LIST] Failed to send command: %s\n", strerror(errno));
+            DEBUG_PRINTF("ERROR: [LIST] Failed to send command: %s\n", strerror(errno));
             return;
         }
-        printf("DEBUG: [LIST] Sent %zd bytes (list_server command)\n", bytes_sent);
+        DEBUG_PRINTF("DEBUG: [LIST] Sent %zd bytes (list_server command)\n", bytes_sent);
     }
 
     // Set a shorter timeout just for this operation
     struct timeval short_timeout;
     short_timeout.tv_sec = 5;
     short_timeout.tv_usec = 0;
-    
+
     {
         std::lock_guard<std::mutex> lock(socket_mutex);
         setsockopt(server_socket, SOL_SOCKET, SO_RCVTIMEO, &short_timeout, sizeof(short_timeout));
@@ -1069,43 +1074,43 @@ void list_server_files() {
 
     {
         std::lock_guard<std::mutex> lock(socket_mutex);
-        printf("DEBUG: [LIST] Waiting for response...\n");
-        ssize_t recv_bytes = recv(server_socket, &response, sizeof(packet), MSG_WAITALL);
-        
+        DEBUG_PRINTF("DEBUG: [LIST] Waiting for response...\n");
+        ssize_t recv_bytes = read_all(server_socket, &response, sizeof(packet));
+
         // Reset timeout to default
         struct timeval default_timeout;
         default_timeout.tv_sec = 10;
         default_timeout.tv_usec = 0;
         setsockopt(server_socket, SOL_SOCKET, SO_RCVTIMEO, &default_timeout, sizeof(default_timeout));
-        
+
         if (recv_bytes <= 0) {
-            printf("ERROR: [LIST] Failed to receive response: %s\n", strerror(errno));
+            DEBUG_PRINTF("ERROR: [LIST] Failed to receive response: %s\n", strerror(errno));
             if (errno == EAGAIN || errno == EWOULDBLOCK) {
-                printf("WARNING: [LIST] Response timeout, resetting connection\n");
+                DEBUG_PRINTF("WARNING: [LIST] Response timeout, resetting connection\n");
                 reset_socket_connection();
             }
             return;
         }
-        printf("DEBUG: [LIST] Received %zd bytes response\n", recv_bytes);
+        DEBUG_PRINTF("DEBUG: [LIST] Received %zd bytes response\n", recv_bytes);
     }
 
     // Validate response packet
-    printf("DEBUG: [LIST] Response: type=%d, seq=%d, length=%d, total_size=%u\n",
+    DEBUG_PRINTF("DEBUG: [LIST] Response: type=%d, seq=%d, length=%d, total_size=%u\n",
            response.type, response.seqn, response.length, response.total_size);
 
     // Strict validation
     if (response.type != CMD_LIST_SERVER) {
-        printf("ERROR: [LIST] Invalid response type: %d (expected %d)\n", 
+        DEBUG_PRINTF("ERROR: [LIST] Invalid response type: %d (expected %d)\n",
                response.type, CMD_LIST_SERVER);
-        printf("WARNING: [LIST] Protocol desync detected, resetting connection\n");
+        DEBUG_PRINTF("WARNING: [LIST] Protocol desync detected, resetting connection\n");
         reset_socket_connection();
         return;
     }
-    
+
     if (response.seqn != expected_seq) {
-        printf("ERROR: [LIST] Sequence number mismatch: %d (expected %d)\n", 
+        DEBUG_PRINTF("ERROR: [LIST] Sequence number mismatch: %d (expected %d)\n",
                response.seqn, expected_seq);
-        printf("WARNING: [LIST] Protocol desync detected, resetting connection\n");
+        DEBUG_PRINTF("WARNING: [LIST] Protocol desync detected, resetting connection\n");
         reset_socket_connection();
         return;
     }
@@ -1114,7 +1119,7 @@ void list_server_files() {
     std::string fileList(response.payload, response.length);
     size_t expectedSize = response.total_size;
 
-    printf("DEBUG: [LIST] Initial response has %zu bytes of data, expecting %zu total bytes\n",
+    DEBUG_PRINTF("DEBUG: [LIST] Initial response has %zu bytes of data, expecting %zu total bytes\n",
            fileList.length(), expectedSize);
 
     // If we expect more data (data packets)
@@ -1126,23 +1131,23 @@ void list_server_files() {
 
             {
                 std::lock_guard<std::mutex> lock(socket_mutex);
-                ssize_t recv_bytes = recv(server_socket, &dataPkt, sizeof(packet), MSG_WAITALL);
+                ssize_t recv_bytes = read_all(server_socket, &dataPkt, sizeof(packet));
                 if (recv_bytes <= 0) {
-                    printf("ERROR: [LIST] Failed to receive additional data: %s\n", strerror(errno));
+                    DEBUG_PRINTF("ERROR: [LIST] Failed to receive additional data: %s\n", strerror(errno));
                     break;
                 }
-                printf("DEBUG: [LIST] Received additional data packet with %zd bytes\n", recv_bytes);
+                DEBUG_PRINTF("DEBUG: [LIST] Received additional data packet with %zd bytes\n", recv_bytes);
             }
 
             if (dataPkt.type != DATA_PACKET) {
-                printf("ERROR: [LIST] Unexpected packet type %d (expected DATA_PACKET)\n", dataPkt.type);
-                printf("WARNING: [LIST] Protocol desync detected, resetting connection\n");
+                DEBUG_PRINTF("ERROR: [LIST] Unexpected packet type %d (expected DATA_PACKET)\n", dataPkt.type);
+                DEBUG_PRINTF("WARNING: [LIST] Protocol desync detected, resetting connection\n");
                 reset_socket_connection();
                 return;
             }
 
             fileList.append(dataPkt.payload, dataPkt.length);
-            printf("DEBUG: [LIST] Received additional data, now have %zu/%zu bytes\n",
+            DEBUG_PRINTF("DEBUG: [LIST] Received additional data, now have %zu/%zu bytes\n",
                    fileList.length(), expectedSize);
         }
     }
@@ -1173,7 +1178,7 @@ void list_server_files() {
         if (!filename.empty() && !sizeStr.empty()) {
             // Validate time strings before conversion to avoid exceptions
             if (mtimeStr.empty() || atimeStr.empty() || ctimeStr.empty()) {
-                printf("WARNING: [LIST] Skipping malformed line: %s\n", line.c_str());
+                DEBUG_PRINTF("WARNING: [LIST] Skipping malformed line: %s\n", line.c_str());
                 continue;
             }
 
@@ -1183,7 +1188,7 @@ void list_server_files() {
                 atime = std::stol(atimeStr);
                 ctime = std::stol(ctimeStr);
             } catch (const std::exception& e) {
-                printf("WARNING: [LIST] Invalid time values in line: %s (%s)\n", line.c_str(), e.what());
+                DEBUG_PRINTF("WARNING: [LIST] Invalid time values in line: %s (%s)\n", line.c_str(), e.what());
                 continue;
             }
 
@@ -1201,8 +1206,8 @@ void list_server_files() {
             file_count++;
         }
     }
-    
-    printf("DEBUG: [LIST] Successfully displayed %d files from server\n", file_count);
+
+    DEBUG_PRINTF("DEBUG: [LIST] Successfully displayed %d files from server\n", file_count);
 }
 
 void list_client_files() {
@@ -1234,7 +1239,7 @@ void list_client_files() {
 void get_sync_dir() {
     // Check socket status first
     if (!check_socket_status()) {
-        printf("ERROR: Socket is in invalid state. Cannot send get_sync_dir command.\n");
+        DEBUG_PRINTF("ERROR: Socket is in invalid state. Cannot send get_sync_dir command.\n");
         return;
     }
 
@@ -1249,20 +1254,20 @@ void get_sync_dir() {
     cmd.total_size = 0;
     cmd.length = 0;
 
-    printf("DEBUG: Sending get_sync_dir command with seq: %d\n", cmd.seqn);
+    DEBUG_PRINTF("DEBUG: Sending get_sync_dir command with seq: %d\n", cmd.seqn);
 
     {
         std::lock_guard<std::mutex> lock(socket_mutex);
         ssize_t bytes_sent = send(server_socket, &cmd, sizeof(packet), 0);
         if (bytes_sent <= 0) {
-            printf("Erro ao enviar comando get_sync_dir: %s\n", strerror(errno));
+            DEBUG_PRINTF("Erro ao enviar comando get_sync_dir: %s\n", strerror(errno));
             return;
         }
-        printf("DEBUG: Sent %zd bytes (get_sync_dir command)\n", bytes_sent);
+        DEBUG_PRINTF("DEBUG: Sent %zd bytes (get_sync_dir command)\n", bytes_sent);
     }
 
     // Wait for server response using direct receive
-    printf("DEBUG: Waiting for get_sync_dir response...\n");
+    DEBUG_PRINTF("DEBUG: Waiting for get_sync_dir response...\n");
     packet response;
     memset(&response, 0, sizeof(packet)); // Clear response packet
 
@@ -1270,17 +1275,17 @@ void get_sync_dir() {
         std::lock_guard<std::mutex> lock(socket_mutex);
         ssize_t recv_bytes = recv(server_socket, &response, sizeof(packet), MSG_WAITALL);
         if (recv_bytes <= 0) {
-            printf("Erro ao receber resposta do servidor: %s\n", strerror(errno));
+            DEBUG_PRINTF("Erro ao receber resposta do servidor: %s\n", strerror(errno));
             return;
         }
-        printf("DEBUG: Received %zd bytes for get_sync_dir response\n", recv_bytes);
+        DEBUG_PRINTF("DEBUG: Received %zd bytes for get_sync_dir response\n", recv_bytes);
     }
 
-    printf("DEBUG: Received get_sync_dir response: %s with seq: %d, total_size: %u\n",
+    DEBUG_PRINTF("DEBUG: Received get_sync_dir response: %s with seq: %d, total_size: %u\n",
            response.payload, response.seqn, response.total_size);
 
     if (response.seqn != cmd.seqn) {
-        printf("WARNING: Sequence number mismatch: got %d, expected %d\n", response.seqn, cmd.seqn);
+        DEBUG_PRINTF("WARNING: Sequence number mismatch: got %d, expected %d\n", response.seqn, cmd.seqn);
     }
 
     if (strcmp(response.payload, "OK") != 0) {
@@ -1307,15 +1312,15 @@ void get_sync_dir() {
             std::lock_guard<std::mutex> lock(socket_mutex);
             ssize_t recv_bytes = recv(server_socket, &filePkt, sizeof(packet), MSG_WAITALL);
             if (recv_bytes <= 0) {
-                printf("Erro ao receber notificação de arquivo: %s\n", strerror(errno));
+                DEBUG_PRINTF("Erro ao receber notificação de arquivo: %s\n", strerror(errno));
                 return;
             }
-            printf("DEBUG: Received file notification %zu/%zu: %s (%zd bytes)\n",
+            DEBUG_PRINTF("DEBUG: Received file notification %zu/%zu: %s (%zd bytes)\n",
                    i+1, numFiles, filePkt.payload, recv_bytes);
         }
 
         if (filePkt.type != SYNC_NOTIFICATION) {
-            printf("ERRO: Esperava notificação de arquivo, recebeu pacote tipo %d\n", filePkt.type);
+            DEBUG_PRINTF("ERRO: Esperava notificação de arquivo, recebeu pacote tipo %d\n", filePkt.type);
             continue;
         }
 
@@ -1323,7 +1328,7 @@ void get_sync_dir() {
         handle_server_notification(filePkt);
     }
 
-    printf("Diretório de sincronização inicializado com %zu arquivos.\n", numFiles);
+    DEBUG_PRINTF("Diretório de sincronização inicializado com %zu arquivos.\n", numFiles);
     update_file_mtimes();
 }
 
@@ -1332,25 +1337,25 @@ bool reset_socket_connection() {
     // Close existing socket
     if (server_socket != -1) {
         close(server_socket);
-        printf("DEBUG: Socket connection reset - closed old socket\n");
+        DEBUG_PRINTF("DEBUG: Socket connection reset - closed old socket\n");
     }
-    
+
     // Create new socket
     server_socket = create_socket();
     if (server_socket == -1) {
-        printf("ERROR: Failed to create new socket\n");
+        DEBUG_PRINTF("ERROR: Failed to create new socket\n");
         return false;
     }
-    
+
     // Set socket to blocking mode
     int flags = fcntl(server_socket, F_GETFL, 0);
     fcntl(server_socket, F_SETFL, flags & ~O_NONBLOCK);
-    
+
     // Set socket timeout options
     struct timeval timeout;
     timeout.tv_sec = 10;  // Reduce timeout from 30 to 10 seconds
     timeout.tv_usec = 0;
-    
+
     // Set send and receive timeout
     if (setsockopt(server_socket, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout)) < 0) {
         perror("Error setting receive timeout");
@@ -1358,23 +1363,23 @@ bool reset_socket_connection() {
     if (setsockopt(server_socket, SOL_SOCKET, SO_SNDTIMEO, &timeout, sizeof(timeout)) < 0) {
         perror("Error setting send timeout");
     }
-    
+
     // Set TCP_NODELAY to disable Nagle's algorithm
     int flag = 1;
     if (setsockopt(server_socket, IPPROTO_TCP, TCP_NODELAY, &flag, sizeof(flag)) < 0) {
         perror("Error setting TCP_NODELAY");
     }
-    
+
     // Connect to server
     if (connect_socket(server_socket, g_server_ip.c_str(), g_server_port) < 0) {
-        printf("ERROR: Failed to reconnect to server at %s:%d\n", g_server_ip.c_str(), g_server_port);
+        DEBUG_PRINTF("ERROR: Failed to reconnect to server at %s:%d\n", g_server_ip.c_str(), g_server_port);
         close(server_socket);
         server_socket = -1;
         return false;
     }
-    
-    printf("DEBUG: Successfully reconnected to server %s:%d\n", g_server_ip.c_str(), g_server_port);
-    
+
+    DEBUG_PRINTF("DEBUG: Successfully reconnected to server %s:%d\n", g_server_ip.c_str(), g_server_port);
+
     // Re-login user
     packet login_pkt;
     memset(&login_pkt, 0, sizeof(packet));
@@ -1383,27 +1388,27 @@ bool reset_socket_connection() {
     login_pkt.total_size = 0;
     strcpy(login_pkt.payload, current_username.c_str());
     login_pkt.length = strlen(current_username.c_str());
-    
+
     ssize_t bytes_sent = send(server_socket, &login_pkt, sizeof(packet), 0);
     if (bytes_sent <= 0) {
-        printf("ERROR: Failed to send login packet after reconnection\n");
+        DEBUG_PRINTF("ERROR: Failed to send login packet after reconnection\n");
         close(server_socket);
         server_socket = -1;
         return false;
     }
-    
+
     // Receive login response
     packet response;
     memset(&response, 0, sizeof(packet));
     ssize_t bytes_received = recv(server_socket, &response, sizeof(packet), MSG_WAITALL);
     if (bytes_received <= 0 || response.type != CMD_LOGIN) {
-        printf("ERROR: Failed to receive valid login response after reconnection\n");
+        DEBUG_PRINTF("ERROR: Failed to receive valid login response after reconnection\n");
         close(server_socket);
         server_socket = -1;
         return false;
     }
-    
-    printf("DEBUG: Successfully re-authenticated to server\n");
+
+    DEBUG_PRINTF("DEBUG: Successfully re-authenticated to server\n");
     connection_alive.store(true);
     return true;
 }

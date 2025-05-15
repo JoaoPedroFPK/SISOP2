@@ -11,8 +11,9 @@ namespace fs = std::filesystem;
 
 FileManager::FileManager() {
     // Create main server directory if it doesn't exist
-    if (!fs::exists("server/files")) {
-        fs::create_directory("server/files");
+
+    if (!fs::exists("files")) {
+        fs::create_directory("files");
     }
 }
 
@@ -46,7 +47,7 @@ std::vector<FileInfo> FileManager::listUserFiles(const std::string& username) {
     // Clear any filesystem cache to force a fresh read
     fs::directory_iterator end;
     fs::directory_iterator it(userDir);
-    
+
     // Reset the iterator to force a fresh directory read
     it = fs::directory_iterator(userDir);
 
@@ -88,17 +89,17 @@ bool FileManager::saveFile(const std::string& username, const std::string& filen
 
     // Write file data
     file.write(data, size);
-    
+
     // Check for errors and flush to ensure data is written
     if (!file.good()) {
         std::cerr << "ERROR: Error writing to file: " << filepath << std::endl;
         file.close();
         return false;
     }
-    
+
     // Explicitly flush to disk
     file.flush();
-    
+
     // Close the file
     file.close();
 
@@ -109,15 +110,15 @@ bool FileManager::saveFile(const std::string& username, const std::string& filen
         fsync(dirfd);  // Force directory entry update
         close(dirfd);
     }
-    
+
     // Double check the file exists and has the right size
     struct stat st;
     if (stat(filepath.c_str(), &st) != 0 || st.st_size != size) {
         std::cerr << "ERROR: File verification failed after save: " << filepath << std::endl;
         return false;
     }
-    
-    std::cout << "File saved successfully: " << filepath 
+
+    std::cout << "File saved successfully: " << filepath
               << " (size: " << size << " bytes)" << std::endl;
     return true;
 }
@@ -195,7 +196,7 @@ void FileManager::propagateFileChange(const std::string& username, const std::st
 }
 
 std::string FileManager::getUserDir(const std::string& username) {
-    return "server/files/sync_dir_" + username;
+    return "files/sync_dir_" + username;
 }
 
 std::string FileManager::getFilePath(const std::string& username, const std::string& filename) {
