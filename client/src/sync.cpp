@@ -391,7 +391,7 @@ void monitor_server_notifications() {
 
         {
             std::lock_guard<std::mutex> lock(socket_mutex);
-            size_t bytes_read = recv(server_socket, &pkt, sizeof(packet), MSG_WAITALL);
+            size_t bytes_read = read_all(server_socket, &pkt, sizeof(packet));
             if (bytes_read != sizeof(packet)) {
                 DEBUG_PRINTF("ERROR: Lost connection to server (read %zu of %zu).\n",
                        bytes_read, sizeof(packet));
