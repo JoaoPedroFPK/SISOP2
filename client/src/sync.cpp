@@ -391,12 +391,23 @@ void monitor_server_notifications() {
 
         {
             std::lock_guard<std::mutex> lock(socket_mutex);
-            size_t bytes_read = read_all(server_socket, &pkt, sizeof(packet));
-            if (bytes_read != sizeof(packet)) {
-                DEBUG_PRINTF("ERROR: Lost connection to server (read %zu of %zu).\n",
-                       bytes_read, sizeof(packet));
-                connection_alive.store(false);
-                break; // Exit monitor thread; other threads will notice connection loss
+
+            // Check if there's any bytes available to read
+            int bytes_available = 0;
+            int err = ioctl(server_socket, FIONREAD, &bytes_available);
+            if (err < 0) {
+                DEBUG_PRINTF("ERR: %d\n", err);
+            }
+
+            if (bytes_available > 0) {
+
+                size_t bytes_read = read_all(server_socket, &pkt, sizeof(packet));
+                if (bytes_read > 0 && bytes_read != sizeof(packet)) {
+                    DEBUG_PRINTF("ERROR: Lost connection to server (read %zu of %zu).\n",
+                        bytes_read, sizeof(packet));
+                    connection_alive.store(false);
+                    break; // Exit monitor thread; other threads will notice connection loss
+                }
             }
         }
 
@@ -437,7 +448,7 @@ void monitor_server_notifications() {
                     command_completed = true;
                     files_remaining = pkt.total_size;
                     expected_seqn = pkt.seqn;
-                    DEBUG_PRINTF("DEBUG Monitor: get_sync_dir response OK, expecting %zu files\n", files_remaining);
+                    // DEBUG_PRINTF("DEBUG Monitor: get_sync_dir response OK, expecting %zu files\n", files_remaining);
 
                     // If no files to sync, mark command as done immediately
                     if (files_remaining == 0) {
@@ -451,8 +462,8 @@ void monitor_server_notifications() {
             {
                 std::lock_guard<std::mutex> lock(responses_mutex);
                 responses[pkt.seqn] = pkt;
-                DEBUG_PRINTF("DEBUG Monitor: Added response for seq %d to map (map size: %zu)\n",
-                      pkt.seqn, responses.size());
+                // DEBUG_PRINTF("DEBUG Monitor: Added response for seq %d to map (map size: %zu)\n",
+                //       pkt.seqn, responses.size());
                 responses_cv.notify_all();
             }
         }
