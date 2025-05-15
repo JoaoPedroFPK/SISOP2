@@ -7,6 +7,7 @@
 #include <errno.h>
 #include <sys/select.h>
 #include <stdio.h>
+#include "common.h"
 
 int create_socket() {
     int sockfd = socket(AF_INET, SOCK_STREAM, 0);
@@ -16,7 +17,7 @@ int create_socket() {
         // Disable Nagle's algorithm to send small packets immediately
         int flag = 1;
         if (setsockopt(sockfd, IPPROTO_TCP, TCP_NODELAY, &flag, sizeof(flag)) < 0) {
-            printf("WARNING: Failed to set TCP_NODELAY: %s\n", strerror(errno));
+            DEBUG_PRINTF("WARNING: Failed to set TCP_NODELAY: %s\n", strerror(errno));
         }
 
         // Set larger send/receive buffers
@@ -89,9 +90,9 @@ size_t read_all(int sockfd, void* buf, size_t len) {
         int select_result = select(sockfd + 1, &readfds, NULL, NULL, &tv);
         if (select_result <= 0) {
             if (select_result == 0) {
-                printf("DEBUG Socket: Read timeout after reading %zu bytes\n", total_read);
+                DEBUG_PRINTF("DEBUG Socket: Read timeout after reading %zu bytes\n", total_read);
             } else {
-                printf("DEBUG Socket: Select error: %s\n", strerror(errno));
+                DEBUG_PRINTF("DEBUG Socket: Select error: %s\n", strerror(errno));
             }
             break; // Timeout or error
         }
@@ -104,12 +105,12 @@ size_t read_all(int sockfd, void* buf, size_t len) {
             if (errno == EINTR) continue; // Interrupted, try again
 
             // Error or connection closed
-            printf("DEBUG Socket: Read error: %s\n", strerror(errno));
+            DEBUG_PRINTF("DEBUG Socket: Read error: %s\n", strerror(errno));
             break;
         }
 
         total_read += bytes_read;
-        printf("DEBUG Socket: Read progress: %zu/%zu bytes\n", total_read, len);
+        DEBUG_PRINTF("DEBUG Socket: Read progress: %zu/%zu bytes\n", total_read, len);
     }
 
     return total_read;

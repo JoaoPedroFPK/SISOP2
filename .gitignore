@@ -9,3 +9,4 @@ server/server
 client/client
 .vscode/settings.json
 input-files/
+*.o

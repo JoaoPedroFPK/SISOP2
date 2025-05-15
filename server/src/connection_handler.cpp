@@ -1,6 +1,7 @@
 #include "connection_handler.h"
 #include "file_manager.h"
 #include "packet.h"
+#include "common.h"
 #include "socket_utils.h"
 #include <pthread.h>
 #include <cstdio>
@@ -16,7 +17,7 @@
 #include <netinet/in.h>
 // #include <linux/tcp.h>
 #include <fcntl.h>
-
+#include <iostream>
 
 // Global FileManager instance
 static FileManager fileManager;
@@ -54,9 +55,19 @@ void notify_clients(const std::string& username, const packet& pkt, int excludeS
 void process_command(int sockfd, packet& pkt);
 
 void run_server(int port) {
+    int err;
     int sockfd = create_socket();
-    bind_socket(sockfd, port);
-    listen_socket(sockfd);
+
+    err = bind_socket(sockfd, port);
+    if (err < 0) {
+        DEBUG_PRINTF("error at bind socket, code %d\n", err);
+    }
+
+    err = listen_socket(sockfd);
+    if (err < 0) {
+        DEBUG_PRINTF("error at listen socket, code: %d\n", err);
+    }
+
 
     printf("Servidor rodando na porta %d...\n", port);
 
@@ -106,17 +117,17 @@ void* handle_client(void* arg) {
     std::string username;
 
     // Read login packet using standard read to avoid potential issues with custom read_all
-    printf("DEBUG Server: Waiting to read login packet (size=%zu bytes)...\n", sizeof(packet));
+    DEBUG_PRINTF("DEBUG Server: Waiting to read login packet (size=%zu bytes)...\n", sizeof(packet));
     ssize_t direct_bytes = recv(sockfd, &pkt, sizeof(packet), MSG_WAITALL);
-    printf("DEBUG Server: Direct read returned %zd bytes\n", direct_bytes);
+    DEBUG_PRINTF("DEBUG Server: Direct read returned %zd bytes\n", direct_bytes);
 
     if (direct_bytes > 0) {
-        printf("DEBUG Server: Received packet header - type: %d, seqn: %d, length: %d\n",
+        DEBUG_PRINTF("DEBUG Server: Received packet header - type: %d, seqn: %d, length: %d\n",
                pkt.type, pkt.seqn, pkt.length);
 
         // Validate payload length
         if (pkt.length > sizeof(pkt.payload)) {
-            printf("ERROR: Invalid payload length: %d (max: %zu)\n", pkt.length, sizeof(pkt.payload));
+            DEBUG_PRINTF("ERROR: Invalid payload length: %d (max: %zu)\n", pkt.length, sizeof(pkt.payload));
             close(sockfd);
             pthread_exit(NULL);
         }
@@ -158,9 +169,9 @@ void* handle_client(void* arg) {
             response.total_size = 0;
             response.length = 0;
 
-            printf("DEBUG Server: Sending login response with seq: %d\n", response.seqn);
+            DEBUG_PRINTF("DEBUG Server: Sending login response with seq: %d\n", response.seqn);
             ssize_t bytes_sent = send(sockfd, &response, sizeof(packet), 0);
-            printf("DEBUG Server: Direct send returned %zd bytes\n", bytes_sent);
+            DEBUG_PRINTF("DEBUG Server: Direct send returned %zd bytes\n", bytes_sent);
 
             // Process commands
             while (true) {
@@ -170,49 +181,49 @@ void* handle_client(void* arg) {
                 int error = 0;
                 socklen_t len = sizeof(error);
                 if (getsockopt(sockfd, SOL_SOCKET, SO_ERROR, &error, &len) < 0 || error != 0) {
-                    printf("DEBUG Server: Socket error check failed, closing connection.\n");
+                    DEBUG_PRINTF("DEBUG Server: Socket error check failed, closing connection.\n");
                     break;
                 }
 
                 // Use direct socket operations to read command packets
-                printf("DEBUG Server: Waiting for next command packet...\n");
+                // DEBUG_PRINTF("DEBUG Server: Waiting for next command packet...\n");
                 errno = 0; // Clear errno before the call
-                
+
                 // Use MSG_PEEK first to check if data is available without consuming it
                 ssize_t peek_bytes = recv(sockfd, &pkt, sizeof(packet), MSG_PEEK | MSG_DONTWAIT);
                 if (peek_bytes == 0) {
                     // Client closed connection gracefully
-                    printf("DEBUG Server: Client closed connection (received EOF).\n");
+                    DEBUG_PRINTF("DEBUG Server: Client closed connection (received EOF).\n");
                     break;
                 } else if (peek_bytes < 0) {
                     if (errno == EAGAIN || errno == EWOULDBLOCK) {
                         // No data available, just timeout, continue waiting
-                        printf("DEBUG Server: Timeout waiting for command, retrying...\n");
+                        // DEBUG_PRINTF("DEBUG Server: Timeout waiting for command, retrying...\n");
                         continue;
                     } else {
                         // Real error
-                        printf("DEBUG Server: Error checking for data: %s (errno=%d)\n", 
+                        DEBUG_PRINTF("DEBUG Server: Error checking for data: %s (errno=%d)\n",
                                strerror(errno), errno);
                         break;
                     }
                 }
-                
+
                 // Now do the actual read with MSG_WAITALL since we know data is available
                 ssize_t cmd_bytes = recv(sockfd, &pkt, sizeof(packet), MSG_WAITALL);
 
                 if (cmd_bytes <= 0) {
-                    printf("DEBUG Server: Failed to read command packet: %s (errno=%d)\n",
+                    DEBUG_PRINTF("DEBUG Server: Failed to read command packet: %s (errno=%d)\n",
                            strerror(errno), errno);
 
                     // Check if connection is still alive
                     if (getsockopt(sockfd, SOL_SOCKET, SO_ERROR, &error, &len) < 0 || error != 0) {
-                        printf("DEBUG Server: Socket is in error state, closing connection.\n");
+                        DEBUG_PRINTF("DEBUG Server: Socket is in error state, closing connection.\n");
                         break;
                     }
 
                     // If it's a timeout, we can try again
                     if (errno == EAGAIN || errno == EWOULDBLOCK) {
-                        printf("DEBUG Server: Timeout waiting for command, retrying...\n");
+                        DEBUG_PRINTF("DEBUG Server: Timeout waiting for command, retrying...\n");
                         continue;
                     }
 
@@ -220,37 +231,37 @@ void* handle_client(void* arg) {
                 }
 
                 if (cmd_bytes < sizeof(packet)) {
-                    printf("DEBUG Server: Read incomplete packet (%zd of %zu bytes)\n",
+                    DEBUG_PRINTF("DEBUG Server: Read incomplete packet (%zd of %zu bytes)\n",
                            cmd_bytes, sizeof(packet));
                     break;
                 }
 
                 // Validate received packet
                 if (pkt.type == 0) {
-                    printf("DEBUG Server: Received invalid packet with type=0, ignoring.\n");
+                    DEBUG_PRINTF("DEBUG Server: Received invalid packet with type=0, ignoring.\n");
                     continue;
                 }
 
-                printf("DEBUG Server: Received command packet type: %d, seq: %d\n", pkt.type, pkt.seqn);
-                
+                DEBUG_PRINTF("DEBUG Server: Received command packet type: %d, seq: %d\n", pkt.type, pkt.seqn);
+
                 // Process the command in a try/catch block to prevent crashes
                 try {
                     process_command(sockfd, pkt);
                 } catch (const std::exception& e) {
-                    printf("ERROR Server: Exception processing command: %s\n", e.what());
+                    DEBUG_PRINTF("ERROR Server: Exception processing command: %s\n", e.what());
                     // Continue processing commands rather than disconnecting
                 }
 
                 if (pkt.type == CMD_EXIT) {
-                    printf("DEBUG Server: Received exit command, closing connection.\n");
+                    DEBUG_PRINTF("DEBUG Server: Received exit command, closing connection.\n");
                     break;
                 }
             }
         } else {
-            printf("ERROR: Expected login packet (type 1), but received type %d\n", pkt.type);
+            DEBUG_PRINTF("ERROR: Expected login packet (type 1), but received type %d\n", pkt.type);
         }
     } else {
-        printf("ERROR: Failed to read login packet: %s\n", strerror(errno));
+        DEBUG_PRINTF("ERROR: Failed to read login packet: %s\n", strerror(errno));
     }
 
     // Unregister client on disconnect
@@ -268,7 +279,7 @@ bool register_client(const std::string& username, int sockfd) {
 
     // Check session limit
     if (connectedClients.count(username) && connectedClients[username].size() >= 2) {
-        printf("SERVER: Session limit (2) reached for user '%s'. Denying connection %d.\n", username.c_str(), sockfd);
+        DEBUG_PRINTF("SERVER: Session limit (2) reached for user '%s'. Denying connection %d.\n", username.c_str(), sockfd);
         pthread_mutex_unlock(&clientsMutex);
         return false;
     }
@@ -278,7 +289,7 @@ bool register_client(const std::string& username, int sockfd) {
     clientInfo.sockfd = sockfd;
     connectedClients[username].push_back(clientInfo);
 
-    printf("SERVER: Registered client %s on socket %d. Total sessions for user: %zu\n",
+    DEBUG_PRINTF("SERVER: Registered client %s on socket %d. Total sessions for user: %zu\n",
            username.c_str(), sockfd, connectedClients[username].size());
 
     pthread_mutex_unlock(&clientsMutex);
@@ -322,11 +333,11 @@ void notify_clients(const std::string& username, const packet& pkt, int excludeS
     // Now send outside the critical section so a slow / blocked socket does
     // not freeze the whole server.
     for (int fd : sockets_to_notify) {
-        printf("DEBUG Server: Notifying client on socket %d about file: %s\n", fd, pkt.payload);
+        DEBUG_PRINTF("DEBUG Server: Notifying client on socket %d about file: %s\n", fd, pkt.payload);
         // Use non-blocking send with MSG_DONTWAIT so we never block indefinitely.
         ssize_t s = send(fd, &pkt, sizeof(packet), MSG_DONTWAIT | MSG_NOSIGNAL);
         if (s < 0) {
-            printf("WARN: Failed to notify socket %d: %s\n", fd, strerror(errno));
+            DEBUG_PRINTF("WARN: Failed to notify socket %d: %s\n", fd, strerror(errno));
         }
     }
 }
@@ -335,7 +346,7 @@ void process_command(int sockfd, packet& pkt) {
     // Create a fresh response packet for each command to avoid reusing memory
     packet response;
     memset(&response, 0, sizeof(packet)); // Clear the response packet
-    
+
     // Basic setup - all commands need these
     response.type = pkt.type;
     response.seqn = pkt.seqn;  // Important: Use the same sequence number from the request
@@ -357,11 +368,11 @@ void process_command(int sockfd, packet& pkt) {
     pthread_mutex_unlock(&clientsMutex);
 
     if (username.empty()) {
-        printf("ERROR: No username found for socket %d\n", sockfd);
+        DEBUG_PRINTF("ERROR: No username found for socket %d\n", sockfd);
         return;
     }
 
-    printf("DEBUG Server: Processing command type %d from user: %s, seq: %d\n",
+    DEBUG_PRINTF("DEBUG Server: Processing command type %d from user: %s, seq: %d\n",
            pkt.type, username.c_str(), pkt.seqn);
 
     // Process based on command type
@@ -369,7 +380,7 @@ void process_command(int sockfd, packet& pkt) {
         case CMD_UPLOAD: {
             // Extract filename from the payload
             std::string filename(pkt.payload);
-            printf("DEBUG Server: Received upload command for file: %s, size: %u bytes\n",
+            DEBUG_PRINTF("DEBUG Server: Received upload command for file: %s, size: %u bytes\n",
                    filename.c_str(), pkt.total_size);
 
             // Receive file data
@@ -384,30 +395,30 @@ void process_command(int sockfd, packet& pkt) {
                 size_t got = read_all(sockfd, &dataPkt, sizeof(packet));
 
                 if (got != sizeof(packet)) {
-                    printf("DEBUG Server: Error reading data packet (read %zu of %zu bytes)\n", got, sizeof(packet));
+                    DEBUG_PRINTF("DEBUG Server: Error reading data packet (read %zu of %zu bytes)\n", got, sizeof(packet));
                     break;
                 }
 
                 // Basic sanity-check of the packet
                 if (dataPkt.type != DATA_PACKET || dataPkt.length > sizeof(dataPkt.payload)) {
-                    printf("DEBUG Server: Malformed data packet received (type=%d, length=%d)\n", dataPkt.type, dataPkt.length);
+                    DEBUG_PRINTF("DEBUG Server: Malformed data packet received (type=%d, length=%d)\n", dataPkt.type, dataPkt.length);
                     break;
                 }
 
                 memcpy(fileData + bytesRead, dataPkt.payload, dataPkt.length);
                 bytesRead += dataPkt.length;
-                printf("DEBUG Server: Received data packet %d, progress: %zu/%u bytes (%d%%)\n",
+                DEBUG_PRINTF("DEBUG Server: Received data packet %d, progress: %zu/%u bytes (%d%%)\n",
                        dataPkt.seqn, bytesRead, pkt.total_size, (int)(bytesRead * 100 / pkt.total_size));
             }
 
-            printf("DEBUG Server: Finished receiving file data, saving file\n");
+            DEBUG_PRINTF("DEBUG Server: Finished receiving file data, saving file\n");
 
             // Save file
             pthread_mutex_lock(&fileMutex);
             bool success = fileManager.saveFile(username, filename, fileData, bytesRead);
             pthread_mutex_unlock(&fileMutex);
 
-            printf("DEBUG Server: File save %s\n", success ? "successful" : "failed");
+            DEBUG_PRINTF("DEBUG Server: File save %s\n", success ? "successful" : "failed");
 
             delete[] fileData;
 
@@ -422,7 +433,7 @@ void process_command(int sockfd, packet& pkt) {
                 notifyPkt.payload[sizeof(notifyPkt.payload)-1] = '\0';
                 notifyPkt.length = strlen(notifyPkt.payload);
 
-                printf("DEBUG Server: Notifying other clients about file: %s\n", filename.c_str());
+                DEBUG_PRINTF("DEBUG Server: Notifying other clients about file: %s\n", filename.c_str());
                 notify_clients(username, notifyPkt, sockfd);
 
                 // Send success response
@@ -432,7 +443,7 @@ void process_command(int sockfd, packet& pkt) {
                 strcpy(response.payload, "ERROR");
                 response.length = 5;
             }
-            printf("DEBUG Server: Sending upload response: %s with seq: %d\n", response.payload, response.seqn);
+            DEBUG_PRINTF("DEBUG Server: Sending upload response: %s with seq: %d\n", response.payload, response.seqn);
             send(sockfd, &response, sizeof(packet), 0);
             break;
         }
@@ -459,7 +470,7 @@ void process_command(int sockfd, packet& pkt) {
                     response.total_size = fileSize;
                     strcpy(response.payload, "OK");
                     response.length = 2;
-                    printf("DEBUG Server: Sending download response: %s with seq: %d\n", response.payload, response.seqn);
+                    DEBUG_PRINTF("DEBUG Server: Sending download response: %s with seq: %d\n", response.payload, response.seqn);
                     send(sockfd, &response, sizeof(packet), 0);
 
                     // Send file data in chunks
@@ -482,14 +493,14 @@ void process_command(int sockfd, packet& pkt) {
                 } else {
                     strcpy(response.payload, "ERROR");
                     response.length = 5;
-                    printf("DEBUG Server: Sending download response: %s with seq: %d\n", response.payload, response.seqn);
+                    DEBUG_PRINTF("DEBUG Server: Sending download response: %s with seq: %d\n", response.payload, response.seqn);
                     send(sockfd, &response, sizeof(packet), 0);
                 }
             } else {
                 pthread_mutex_unlock(&fileMutex);
                 strcpy(response.payload, "NOT_FOUND");
                 response.length = 9;
-                printf("DEBUG Server: Sending download response: %s with seq: %d\n", response.payload, response.seqn);
+                DEBUG_PRINTF("DEBUG Server: Sending download response: %s with seq: %d\n", response.payload, response.seqn);
                 send(sockfd, &response, sizeof(packet), 0);
             }
             break;
@@ -497,12 +508,12 @@ void process_command(int sockfd, packet& pkt) {
 
         case CMD_DELETE: {
             std::string filename(pkt.payload);
-            
+
             // CRITICAL: Use command-specific variables to avoid shared memory issues
             int delete_client_fd = sockfd;
-            uint16_t delete_seq = pkt.seqn;  
-            
-            printf("DEBUG Server: [DELETE] Command received for file: %s (seq: %d)\n", 
+            uint16_t delete_seq = pkt.seqn;
+
+            DEBUG_PRINTF("DEBUG Server: [DELETE] Command received for file: %s (seq: %d)\n",
                   filename.c_str(), delete_seq);
 
             // Prepare an isolated response packet
@@ -510,20 +521,20 @@ void process_command(int sockfd, packet& pkt) {
             memset(&delete_response, 0, sizeof(packet));
             delete_response.type = CMD_DELETE;  // CRITICAL: set correct type
             delete_response.seqn = delete_seq;  // CRITICAL: preserve sequence number
-            
+
             // Process delete operation with exclusive lock
             pthread_mutex_lock(&fileMutex);
             bool exists = fileManager.fileExists(username, filename);
             bool success = false;
-            
+
             if (exists) {
-                printf("DEBUG Server: [DELETE] File %s exists, attempting deletion\n", filename.c_str());
+                DEBUG_PRINTF("DEBUG Server: [DELETE] File %s exists, attempting deletion\n", filename.c_str());
                 success = fileManager.deleteFile(username, filename);
             } else {
-                printf("DEBUG Server: [DELETE] File %s not found\n", filename.c_str());
+                DEBUG_PRINTF("DEBUG Server: [DELETE] File %s not found\n", filename.c_str());
             }
             pthread_mutex_unlock(&fileMutex);
-            
+
             // Set response based on operation result
             if (!exists) {
                 strcpy(delete_response.payload, "NOT_FOUND");
@@ -531,7 +542,7 @@ void process_command(int sockfd, packet& pkt) {
             } else if (success) {
                 strcpy(delete_response.payload, "OK");
                 delete_response.length = 2;
-                
+
                 // Only notify if deletion was successful
                 packet notifyPkt;
                 memset(&notifyPkt, 0, sizeof(packet));
@@ -541,30 +552,30 @@ void process_command(int sockfd, packet& pkt) {
                 strncpy(notifyPkt.payload, payload.c_str(), sizeof(notifyPkt.payload) - 1);
                 notifyPkt.payload[sizeof(notifyPkt.payload)-1] = '\0';
                 notifyPkt.length = strlen(notifyPkt.payload);
-                
-                printf("DEBUG Server: [DELETE] Notifying other clients about deletion\n");
+
+                DEBUG_PRINTF("DEBUG Server: [DELETE] Notifying other clients about deletion\n");
                 notify_clients(username, notifyPkt, delete_client_fd);
             } else {
                 strcpy(delete_response.payload, "ERROR");
                 delete_response.length = 5;
             }
-            
+
             // Verify the response packet is correct
-            printf("DEBUG Server: [DELETE] Prepared response packet: type=%d, seq=%d, payload='%s'\n",
+            DEBUG_PRINTF("DEBUG Server: [DELETE] Prepared response packet: type=%d, seq=%d, payload='%s'\n",
                   delete_response.type, delete_response.seqn, delete_response.payload);
-            
+
             // CRITICAL: Send response directly with exclusive lock
             pthread_mutex_lock(&fileMutex);  // Use file mutex to ensure exclusive socket access
             ssize_t bytes_sent = send(delete_client_fd, &delete_response, sizeof(packet), 0);
             pthread_mutex_unlock(&fileMutex);
-            
+
             if (bytes_sent == sizeof(packet)) {
-                printf("DEBUG Server: [DELETE] Response sent successfully (%zd bytes)\n", bytes_sent);
+                DEBUG_PRINTF("DEBUG Server: [DELETE] Response sent successfully (%zd bytes)\n", bytes_sent);
             } else {
-                printf("ERROR Server: [DELETE] Failed to send response (%zd bytes): %s\n", 
+                DEBUG_PRINTF("ERROR Server: [DELETE] Failed to send response (%zd bytes): %s\n",
                        bytes_sent, strerror(errno));
             }
-            
+
             break;
         }
 
@@ -575,19 +586,19 @@ void process_command(int sockfd, packet& pkt) {
             list_response.type = CMD_LIST_SERVER;
             list_response.seqn = pkt.seqn;
 
-            printf("DEBUG Server: Processing list_server command for user %s\n", username.c_str());
-            
+            DEBUG_PRINTF("DEBUG Server: Processing list_server command for user %s\n", username.c_str());
+
             // Force filesystem refresh by ensuring the user directory exists
             pthread_mutex_lock(&fileMutex);
             fileManager.initUserDirectory(username); // This refreshes directory access
             pthread_mutex_unlock(&fileMutex);
-            
+
             // Get files with mutex protection
             pthread_mutex_lock(&fileMutex);
             auto files = fileManager.listUserFiles(username);
             pthread_mutex_unlock(&fileMutex);
-            
-            printf("DEBUG Server: Found %zu files for user %s\n", files.size(), username.c_str());
+
+            DEBUG_PRINTF("DEBUG Server: Found %zu files for user %s\n", files.size(), username.c_str());
 
             // Format file list
             std::string fileList;
@@ -598,10 +609,10 @@ void process_command(int sockfd, packet& pkt) {
                            std::to_string(file.atime) + "," +
                            std::to_string(file.ctime) + "\n";
                 fileList += entry;
-                printf("DEBUG Server: Adding file to list: %s (size: %zu)\n", 
+                DEBUG_PRINTF("DEBUG Server: Adding file to list: %s (size: %zu)\n",
                        file.filename.c_str(), file.size);
             }
-            
+
             // Set response metadata
             list_response.total_size = fileList.size();
 
@@ -609,26 +620,26 @@ void process_command(int sockfd, packet& pkt) {
             if (fileList.empty()) {
                 strcpy(list_response.payload, "");
                 list_response.length = 0;
-                printf("DEBUG Server: No files found, sending empty list\n");
+                DEBUG_PRINTF("DEBUG Server: No files found, sending empty list\n");
             } else {
                 // Only copy up to the payload size limit
                 size_t bytes_to_copy = std::min(sizeof(list_response.payload) - 1, fileList.size());
                 strncpy(list_response.payload, fileList.c_str(), bytes_to_copy);
                 list_response.payload[bytes_to_copy] = '\0'; // Ensure null termination
                 list_response.length = bytes_to_copy;
-                printf("DEBUG Server: File list prepared (%zu bytes, %zu files)\n", 
+                DEBUG_PRINTF("DEBUG Server: File list prepared (%zu bytes, %zu files)\n",
                        fileList.size(), files.size());
             }
 
-            printf("DEBUG Server: Sending list_server response with seq: %d, total_size: %u\n", 
+            DEBUG_PRINTF("DEBUG Server: Sending list_server response with seq: %d, total_size: %u\n",
                    list_response.seqn, list_response.total_size);
             ssize_t bytes_sent = send(sockfd, &list_response, sizeof(packet), 0);
-            printf("DEBUG Server: Sent list_server response header (%zd bytes)\n", bytes_sent);
+            DEBUG_PRINTF("DEBUG Server: Sent list_server response header (%zd bytes)\n", bytes_sent);
 
             // If list is longer than payload, send the rest in DATA packets
             if (fileList.size() > sizeof(list_response.payload) - 1) {
                 size_t bytesSent = sizeof(list_response.payload) - 1;
-                
+
                 while (bytesSent < fileList.size()) {
                     packet dataPkt;
                     memset(&dataPkt, 0, sizeof(packet));
@@ -640,7 +651,7 @@ void process_command(int sockfd, packet& pkt) {
                     dataPkt.payload[bytesToSend] = '\0'; // Ensure null termination
                     dataPkt.length = bytesToSend;
 
-                    printf("DEBUG Server: Sending list_server data packet: %zu bytes\n", bytesToSend);
+                    DEBUG_PRINTF("DEBUG Server: Sending list_server data packet: %zu bytes\n", bytesToSend);
                     send(sockfd, &dataPkt, sizeof(packet), 0);
                     bytesSent += bytesToSend;
                 }
@@ -658,7 +669,7 @@ void process_command(int sockfd, packet& pkt) {
             response.total_size = files.size();
             strcpy(response.payload, "OK");
             response.length = 2;
-            printf("DEBUG Server: Sending get_sync_dir response: %s with seq: %d, total_size: %u\n",
+            DEBUG_PRINTF("DEBUG Server: Sending get_sync_dir response: %s with seq: %d, total_size: %u\n",
                    response.payload, response.seqn, response.total_size);
             send(sockfd, &response, sizeof(packet), 0);
 
@@ -681,7 +692,7 @@ void process_command(int sockfd, packet& pkt) {
         case CMD_EXIT: {
             strcpy(response.payload, "OK");
             response.length = 2;
-            printf("DEBUG Server: Sending exit response: %s with seq: %d\n", response.payload, response.seqn);
+            DEBUG_PRINTF("DEBUG Server: Sending exit response: %s with seq: %d\n", response.payload, response.seqn);
             send(sockfd, &response, sizeof(packet), 0);
             break;
         }
