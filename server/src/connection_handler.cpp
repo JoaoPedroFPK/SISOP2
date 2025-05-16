@@ -230,7 +230,7 @@ void* handle_client(void* arg) {
                     break;
                 }
 
-                if (cmd_bytes < sizeof(packet)) {
+                if (cmd_bytes < static_cast<ssize_t>(sizeof(packet))) {
                     DEBUG_PRINTF("DEBUG Server: Read incomplete packet (%zd of %zu bytes)\n",
                            cmd_bytes, sizeof(packet));
                     break;
@@ -665,26 +665,24 @@ void process_command(int sockfd, packet& pkt) {
             auto files = fileManager.listUserFiles(username);
             pthread_mutex_unlock(&fileMutex);
 
-            // Send number of files
+            // Envie resposta principal
             response.total_size = files.size();
             strcpy(response.payload, "OK");
             response.length = 2;
             DEBUG_PRINTF("DEBUG Server: Sending get_sync_dir response: %s with seq: %d, total_size: %u\n",
-                   response.payload, response.seqn, response.total_size);
-            send(sockfd, &response, sizeof(packet), 0);
+                response.payload, response.seqn, response.total_size);
+            write_all(sockfd, &response, sizeof(packet));
 
-            // Send each file info
+            // Para cada arquivo, envie uma notificação SYNC_NOTIFICATION
             for (const auto& file : files) {
-                packet infoPkt;
-                infoPkt.type = SYNC_NOTIFICATION;
-                infoPkt.seqn = 0;
-                infoPkt.total_size = file.size;
-                std::string payload = std::string("U:") + file.filename;
-                strncpy(infoPkt.payload, payload.c_str(), sizeof(infoPkt.payload) - 1);
-                infoPkt.payload[sizeof(infoPkt.payload)-1] = '\0';
-                infoPkt.length = strlen(infoPkt.payload);
-
-                send(sockfd, &infoPkt, sizeof(packet), 0);
+                packet notif;
+                memset(&notif, 0, sizeof(packet));
+                notif.type = SYNC_NOTIFICATION;
+                notif.seqn = pkt.seqn; // Use o mesmo seqn do comando!
+                notif.total_size = file.size;
+                snprintf(notif.payload, sizeof(notif.payload), "U:%s", file.filename.c_str());
+                notif.length = strlen(notif.payload);
+                write_all(sockfd, &notif, sizeof(packet));
             }
             break;
         }

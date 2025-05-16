@@ -6,7 +6,7 @@ CLIENT_C_SRC  = src/isocline.c
 CLIENT_OBJ    = $(CLIENT_CPP_SRC:.cpp=.o) src/isocline.o
 INCLUDES   = -I include/ -Iclient/headers -Iserver/headers -Icommon/headers
 
-CXXFLAGS = -std=c++17 -pthread -Wall -Wextra -Wpedantic -O0
+CXXFLAGS = -std=c++17 -pthread
 CCFLAGS  = -std=c11
 
 all: server client
@@ -23,3 +23,5 @@ src/isocline.o: $(CLIENT_C_SRC)
 clean:
 	rm -f server/server client/client
 	rm src/isocline.o
+	rm files
+	rm server/files

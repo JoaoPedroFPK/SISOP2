@@ -12,8 +12,8 @@ namespace fs = std::filesystem;
 FileManager::FileManager() {
     // Create main server directory if it doesn't exist
 
-    if (!fs::exists("files")) {
-        fs::create_directory("files");
+    if (!fs::exists("server/files")) {
+        fs::create_directory("server/files");
     }
 }
 
@@ -113,7 +113,7 @@ bool FileManager::saveFile(const std::string& username, const std::string& filen
 
     // Double check the file exists and has the right size
     struct stat st;
-    if (stat(filepath.c_str(), &st) != 0 || st.st_size != size) {
+    if (stat(filepath.c_str(), &st) != 0 || static_cast<size_t>(st.st_size) != size) {
         std::cerr << "ERROR: File verification failed after save: " << filepath << std::endl;
         return false;
     }
@@ -188,15 +188,16 @@ FileInfo FileManager::getFileInfo(const std::string& username, const std::string
     return info;
 }
 
-void FileManager::propagateFileChange(const std::string& username, const std::string& filename,
-                                    int excludeSocketFd) {
-    // This function will be implemented later when we have
-    // a way to track connected devices for each user
-    // It should send updates to all connected sessions except the one that made the change
-}
+// TODO
+// void FileManager::propagateFileChange(const std::string& username, const std::string& filename,
+//                                     int excludeSocketFd) {
+//     // This function will be implemented later when we have
+//     // a way to track connected devices for each user
+//     // It should send updates to all connected sessions except the one that made the change
+// }
 
 std::string FileManager::getUserDir(const std::string& username) {
-    return "files/sync_dir_" + username;
+    return "server/files/sync_dir_" + username;
 }
 
 std::string FileManager::getFilePath(const std::string& username, const std::string& filename) {
