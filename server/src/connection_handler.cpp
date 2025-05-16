@@ -434,7 +434,7 @@ void process_command(int sockfd, packet& pkt) {
                 notifyPkt.length = strlen(notifyPkt.payload);
 
                 DEBUG_PRINTF("DEBUG Server: Notifying other clients about file: %s\n", filename.c_str());
-                notify_clients(username, notifyPkt, sockfd);
+                // notify_clients(username, notifyPkt, sockfd);
 
                 // Send success response
                 strcpy(response.payload, "OK");
@@ -554,7 +554,7 @@ void process_command(int sockfd, packet& pkt) {
                 notifyPkt.length = strlen(notifyPkt.payload);
 
                 DEBUG_PRINTF("DEBUG Server: [DELETE] Notifying other clients about deletion\n");
-                notify_clients(username, notifyPkt, delete_client_fd);
+                // notify_clients(username, notifyPkt, delete_client_fd);
             } else {
                 strcpy(delete_response.payload, "ERROR");
                 delete_response.length = 5;
