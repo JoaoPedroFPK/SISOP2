@@ -47,6 +47,8 @@ std::mutex file_mutex;
 // Mutex for socket communication
 std::mutex socket_mutex;
 
+std::mutex download_mutex;
+
 // Map to store responses
 std::map<uint16_t, packet> responses;
 std::mutex responses_mutex;
@@ -386,6 +388,8 @@ void monitor_server_notifications() {
 
     while (true) {
         // Wait for notifications from the server
+        std::lock_guard<std::mutex> pause_monitor(download_mutex);
+        
         packet pkt;
         memset(&pkt, 0, sizeof(packet)); // Clear the packet before reading
 
@@ -759,6 +763,8 @@ bool upload_file(const std::string& filepath) {
 }
 
 bool download_file(const std::string& filename) {
+    std::lock_guard<std::mutex> pause_monitor(download_mutex);
+
     // Check socket status first
     if (!check_socket_status()) {
         DEBUG_PRINTF("ERROR: Socket is in invalid state. Cannot send download command.\n");

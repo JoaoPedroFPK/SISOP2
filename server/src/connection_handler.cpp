@@ -316,30 +316,40 @@ void unregister_client(const std::string& username, int sockfd) {
 }
 
 void notify_clients(const std::string& username, const packet& pkt, int excludeSockfd) {
+    DEBUG_PRINTF("DEBUG Server: notify_clients called for user '%s', excludeSockfd=%d\n", username.c_str(), excludeSockfd);
+
     std::vector<int> sockets_to_notify;
 
     // Copy the list of sockets while holding the mutex for the minimum time
     pthread_mutex_lock(&clientsMutex);
     auto it = connectedClients.find(username);
     if (it != connectedClients.end()) {
+        DEBUG_PRINTF("DEBUG Server: Found %zu connected clients for user '%s'\n", it->second.size(), username.c_str());
         for (const auto& client : it->second) {
+            DEBUG_PRINTF("DEBUG Server: Considering client sockfd=%d (excludeSockfd=%d)\n", client.sockfd, excludeSockfd);
             if (client.sockfd != excludeSockfd) {
                 sockets_to_notify.push_back(client.sockfd);
             }
         }
+    } else {
+        DEBUG_PRINTF("DEBUG Server: No connected clients found for user '%s'\n", username.c_str());
     }
     pthread_mutex_unlock(&clientsMutex);
 
     // Now send outside the critical section so a slow / blocked socket does
     // not freeze the whole server.
     for (int fd : sockets_to_notify) {
-        DEBUG_PRINTF("DEBUG Server: Notifying client on socket %d about file: %s\n", fd, pkt.payload);
+        DEBUG_PRINTF("DEBUG Server: Notifying client on socket %d about file: %s (packet type=%d, seqn=%d, length=%d)\n",
+                     fd, pkt.payload, pkt.type, pkt.seqn, pkt.length);
         // Use non-blocking send with MSG_DONTWAIT so we never block indefinitely.
         ssize_t s = send(fd, &pkt, sizeof(packet), MSG_DONTWAIT | MSG_NOSIGNAL);
         if (s < 0) {
             DEBUG_PRINTF("WARN: Failed to notify socket %d: %s\n", fd, strerror(errno));
+        } else {
+            DEBUG_PRINTF("DEBUG Server: Successfully notified socket %d (%zd bytes sent)\n", fd, s);
         }
     }
+    DEBUG_PRINTF("DEBUG Server: notify_clients finished for user '%s'\n", username.c_str());
 }
 
 void process_command(int sockfd, packet& pkt) {
@@ -434,7 +444,7 @@ void process_command(int sockfd, packet& pkt) {
                 notifyPkt.length = strlen(notifyPkt.payload);
 
                 DEBUG_PRINTF("DEBUG Server: Notifying other clients about file: %s\n", filename.c_str());
-                // notify_clients(username, notifyPkt, sockfd);
+                notify_clients(username, notifyPkt, sockfd);
 
                 // Send success response
                 strcpy(response.payload, "OK");
@@ -554,7 +564,7 @@ void process_command(int sockfd, packet& pkt) {
                 notifyPkt.length = strlen(notifyPkt.payload);
 
                 DEBUG_PRINTF("DEBUG Server: [DELETE] Notifying other clients about deletion\n");
-                // notify_clients(username, notifyPkt, delete_client_fd);
+                notify_clients(username, notifyPkt, delete_client_fd);
             } else {
                 strcpy(delete_response.payload, "ERROR");
                 delete_response.length = 5;

@@ -10,6 +10,9 @@ CXXFLAGS = -std=c++17 -pthread -Wall -Wextra -Wpedantic -O0
 CCFLAGS  = -std=c11
 
 all: server client
+	cp server/server servidor/
+	cp client/client cliente1/
+	cp client/client cliente2/
 
 server:
 	g++ $(CXXFLAGS) -o server/server $(SERVER_SRC) $(INCLUDES)
@@ -22,4 +25,6 @@ src/isocline.o: $(CLIENT_C_SRC)
 
 clean:
 	rm -f server/server client/client
-	rm src/isocline.o
+	rm -rf servidor/server
+	rm -rf cliente1/client
+	rm -rf cliente2/client
