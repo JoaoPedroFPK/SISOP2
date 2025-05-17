@@ -24,6 +24,7 @@ src/isocline.o: $(CLIENT_C_SRC)
 	gcc $(CCFLAGS) -c $< -o $@
 
 clean:
+	rm src/isocline.o
 	rm -f server/server client/client
 	rm -rf servidor/server
 	rm -rf cliente1/client
