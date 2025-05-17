@@ -26,8 +26,12 @@
 #include <condition_variable>
 #include <errno.h>
 #include <atomic>
+#include <set>
 
 namespace fs = std::filesystem;
+
+std::set<std::string> arquivos_sincronizados;
+std::mutex arquivos_sincronizados_mutex;
 
 // Global variables
 int server_socket = -1;
@@ -305,8 +309,15 @@ void check_for_file_changes() {
 
         closedir(dir);
 
-        // Check for modified or new files
         for (const auto& file : current_files) {
+            // IGNORE arquivos sincronizados recentemente
+            {
+                std::lock_guard<std::mutex> lock(arquivos_sincronizados_mutex);
+                if (arquivos_sincronizados.count(file)) {
+                    arquivos_sincronizados.erase(file);
+                    continue; // Não faz upload desse arquivo
+                }
+            }
             auto it = file_mtimes.find(file);
             if (it == file_mtimes.end() || it->second != current_mtimes[file]) {
                 // File is new or modified
@@ -568,6 +579,11 @@ void handle_server_notification(packet& pkt) {
                     file.write(fileData, fileSize);
                     file.close();
                     delete[] fileData;
+
+                    {
+                        std::lock_guard<std::mutex> lock(arquivos_sincronizados_mutex);
+                        arquivos_sincronizados.insert(filename);
+                    }
 
                     // Update file times map
                     struct stat st;
