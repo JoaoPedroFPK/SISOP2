@@ -328,8 +328,9 @@ void check_for_file_changes() {
         // Check for deleted files
         for (const auto& entry : file_mtimes) {
             if (current_mtimes.find(entry.first) == current_mtimes.end()) {
+                // TODO: bug here.
                 // File was deleted
-                process_file_change(entry.first, true);
+                // process_file_change(entry.first, true);
             }
         }
 
@@ -400,7 +401,7 @@ void monitor_server_notifications() {
     while (true) {
         // Wait for notifications from the server
         std::lock_guard<std::mutex> pause_monitor(download_mutex);
-        
+
         packet pkt;
         memset(&pkt, 0, sizeof(packet)); // Clear the packet before reading
 
@@ -463,7 +464,7 @@ void monitor_server_notifications() {
                     command_completed = true;
                     files_remaining = pkt.total_size;
                     expected_seqn = pkt.seqn;
-                    // DEBUG_PRINTF("DEBUG Monitor: get_sync_dir response OK, expecting %zu files\n", files_remaining);
+                    DEBUG_PRINTF("DEBUG Monitor: get_sync_dir response OK, expecting %zu files\n", files_remaining);
 
                     // If no files to sync, mark command as done immediately
                     if (files_remaining == 0) {
