@@ -26,8 +26,12 @@
 #include <condition_variable>
 #include <errno.h>
 #include <atomic>
+#include <set>
 
 namespace fs = std::filesystem;
+
+std::set<std::string> arquivos_sincronizados;
+std::mutex arquivos_sincronizados_mutex;
 
 // Global variables
 int server_socket = -1;
@@ -46,6 +50,8 @@ std::mutex file_mutex;
 
 // Mutex for socket communication
 std::mutex socket_mutex;
+
+std::mutex download_mutex;
 
 // Map to store responses
 std::map<uint16_t, packet> responses;
@@ -303,8 +309,15 @@ void check_for_file_changes() {
 
         closedir(dir);
 
-        // Check for modified or new files
         for (const auto& file : current_files) {
+            // IGNORE arquivos sincronizados recentemente
+            {
+                std::lock_guard<std::mutex> lock(arquivos_sincronizados_mutex);
+                if (arquivos_sincronizados.count(file)) {
+                    arquivos_sincronizados.erase(file);
+                    continue; // Não faz upload desse arquivo
+                }
+            }
             auto it = file_mtimes.find(file);
             if (it == file_mtimes.end() || it->second != current_mtimes[file]) {
                 // File is new or modified
@@ -315,8 +328,9 @@ void check_for_file_changes() {
         // Check for deleted files
         for (const auto& entry : file_mtimes) {
             if (current_mtimes.find(entry.first) == current_mtimes.end()) {
+                // TODO: bug here.
                 // File was deleted
-                process_file_change(entry.first, true);
+                // process_file_change(entry.first, true);
             }
         }
 
@@ -386,17 +400,30 @@ void monitor_server_notifications() {
 
     while (true) {
         // Wait for notifications from the server
+        std::lock_guard<std::mutex> pause_monitor(download_mutex);
+
         packet pkt;
         memset(&pkt, 0, sizeof(packet)); // Clear the packet before reading
 
         {
             std::lock_guard<std::mutex> lock(socket_mutex);
-            size_t bytes_read = read_all(server_socket, &pkt, sizeof(packet));
-            if (bytes_read != sizeof(packet)) {
-                DEBUG_PRINTF("ERROR: Lost connection to server (read %zu of %zu).\n",
-                       bytes_read, sizeof(packet));
-                connection_alive.store(false);
-                break; // Exit monitor thread; other threads will notice connection loss
+
+            // Check if there's any bytes available to read
+            int bytes_available = 0;
+            int err = ioctl(server_socket, FIONREAD, &bytes_available);
+            if (err < 0) {
+                DEBUG_PRINTF("ERR: %d\n", err);
+            }
+
+            if (bytes_available > 0) {
+
+                size_t bytes_read = read_all(server_socket, &pkt, sizeof(packet));
+                if (bytes_read > 0 && bytes_read != sizeof(packet)) {
+                    DEBUG_PRINTF("ERROR: Lost connection to server (read %zu of %zu).\n",
+                        bytes_read, sizeof(packet));
+                    connection_alive.store(false);
+                    break; // Exit monitor thread; other threads will notice connection loss
+                }
             }
         }
 
@@ -451,8 +478,8 @@ void monitor_server_notifications() {
             {
                 std::lock_guard<std::mutex> lock(responses_mutex);
                 responses[pkt.seqn] = pkt;
-                DEBUG_PRINTF("DEBUG Monitor: Added response for seq %d to map (map size: %zu)\n",
-                      pkt.seqn, responses.size());
+                // DEBUG_PRINTF("DEBUG Monitor: Added response for seq %d to map (map size: %zu)\n",
+                //       pkt.seqn, responses.size());
                 responses_cv.notify_all();
             }
         }
@@ -553,6 +580,11 @@ void handle_server_notification(packet& pkt) {
                     file.write(fileData, fileSize);
                     file.close();
                     delete[] fileData;
+
+                    {
+                        std::lock_guard<std::mutex> lock(arquivos_sincronizados_mutex);
+                        arquivos_sincronizados.insert(filename);
+                    }
 
                     // Update file times map
                     struct stat st;
@@ -748,6 +780,8 @@ bool upload_file(const std::string& filepath) {
 }
 
 bool download_file(const std::string& filename) {
+    std::lock_guard<std::mutex> pause_monitor(download_mutex);
+
     // Check socket status first
     if (!check_socket_status()) {
         DEBUG_PRINTF("ERROR: Socket is in invalid state. Cannot send download command.\n");
