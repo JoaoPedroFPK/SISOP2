@@ -115,3 +115,33 @@ size_t read_all(int sockfd, void* buf, size_t len) {
 
     return total_read;
 }
+
+// Higher-level helper functions
+int create_client_socket(const std::string& address, int port) {
+    int sockfd = create_socket();
+    if (sockfd < 0) return -1;
+    
+    if (connect_socket(sockfd, address.c_str(), port) < 0) {
+        close(sockfd);
+        return -1;
+    }
+    
+    return sockfd;
+}
+
+int create_server_socket(int port) {
+    int sockfd = create_socket();
+    if (sockfd < 0) return -1;
+    
+    if (bind_socket(sockfd, port) < 0) {
+        close(sockfd);
+        return -1;
+    }
+    
+    if (listen_socket(sockfd) < 0) {
+        close(sockfd);
+        return -1;
+    }
+    
+    return sockfd;
+}
