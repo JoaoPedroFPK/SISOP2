@@ -1,31 +1,94 @@
-.PHONY: all server client clean
+# Master Makefile for File Synchronization System
 
-SERVER_SRC = $(wildcard server/src/*.cpp) $(wildcard common/src/*.cpp)
-CLIENT_CPP_SRC = $(wildcard client/src/*.cpp) $(wildcard common/src/*.cpp)
-CLIENT_C_SRC  = src/isocline.c
-CLIENT_OBJ    = $(CLIENT_CPP_SRC:.cpp=.o) src/isocline.o
-INCLUDES   = -I include/ -Iclient/headers -Iserver/headers -Icommon/headers
+# Compiler and flags
+CXX = g++
+CC = gcc
+CXXFLAGS = -std=c++17 -Wall -Wextra -O2 -I./common/headers -I./include
+CFLAGS = -std=c11
+LDFLAGS = -lpthread
 
-CXXFLAGS = -std=c++17 -pthread -Wall -Wextra -Wpedantic -O0
-CCFLAGS  = -std=c11
+# Directories
+CLIENT_DIR = client
+SERVER_DIR = server
+COMMON_DIR = common
+CONFIG_DIR = config
 
-all: server client
-	cp server/server servidor/
-	cp client/client cliente1/
-	cp client/client cliente2/
+# Output
+CLIENT_TARGET = $(CLIENT_DIR)/client
+SERVER_TARGET = $(SERVER_DIR)/server
 
-server:
-	g++ $(CXXFLAGS) -o server/server $(SERVER_SRC) $(INCLUDES)
+# Isocline library
+ISOCLINE_SRC = src/isocline.c
+ISOCLINE_OBJ = src/isocline.o
 
-client: src/isocline.o
-	g++ $(CXXFLAGS) -o client/client $(CLIENT_CPP_SRC) src/isocline.o $(INCLUDES)
+# Common sources - now includes replication protocol and cluster config
+COMMON_SOURCES = $(COMMON_DIR)/src/socket_utils.cpp $(COMMON_DIR)/src/sync_protocol.cpp \
+                 $(COMMON_DIR)/src/replication_protocol.cpp $(COMMON_DIR)/src/cluster_config.cpp
+COMMON_OBJECTS = $(COMMON_SOURCES:.cpp=.o)
 
-src/isocline.o: $(CLIENT_C_SRC)
-	gcc $(CCFLAGS) -c $< -o $@
+# Client sources
+CLIENT_SOURCES = $(CLIENT_DIR)/src/client.cpp $(CLIENT_DIR)/src/sync_client.cpp
+CLIENT_OBJECTS = $(CLIENT_SOURCES:.cpp=.o)
+
+# Server sources  
+SERVER_SOURCES = $(SERVER_DIR)/src/server.cpp $(SERVER_DIR)/src/sync_server.cpp \
+                 $(SERVER_DIR)/src/file_manager.cpp $(SERVER_DIR)/src/client_manager.cpp
+SERVER_OBJECTS = $(SERVER_SOURCES:.cpp=.o)
+
+.PHONY: all clean client server test-config
+
+all: client server
+
+client: $(CLIENT_TARGET)
+
+server: $(SERVER_TARGET)
+
+$(CLIENT_TARGET): $(CLIENT_OBJECTS) $(COMMON_OBJECTS) $(ISOCLINE_OBJ)
+	$(CXX) $(CXXFLAGS) -I$(CLIENT_DIR)/headers $^ -o $@ $(LDFLAGS)
+
+$(SERVER_TARGET): $(SERVER_OBJECTS) $(COMMON_OBJECTS)
+	$(CXX) $(CXXFLAGS) -I$(SERVER_DIR)/headers $^ -o $@ $(LDFLAGS)
+
+# Isocline library
+$(ISOCLINE_OBJ): $(ISOCLINE_SRC)
+	$(CC) $(CFLAGS) -c $< -o $@
+
+# Pattern rules for object files
+$(CLIENT_DIR)/%.o: $(CLIENT_DIR)/%.cpp
+	$(CXX) $(CXXFLAGS) -I$(CLIENT_DIR)/headers -c $< -o $@
+
+$(SERVER_DIR)/%.o: $(SERVER_DIR)/%.cpp
+	$(CXX) $(CXXFLAGS) -I$(SERVER_DIR)/headers -c $< -o $@
+
+$(COMMON_DIR)/%.o: $(COMMON_DIR)/%.cpp
+	$(CXX) $(CXXFLAGS) -c $< -o $@
+
+# Configuration testing
+test-config: $(COMMON_OBJECTS)
+	@echo "Testing cluster configuration..."
+	$(CXX) $(CXXFLAGS) -DTEST_CONFIG -o test_config \
+		$(COMMON_DIR)/src/cluster_config.cpp $(COMMON_DIR)/src/replication_protocol.cpp \
+		$(COMMON_DIR)/src/sync_protocol.cpp $(COMMON_DIR)/src/socket_utils.cpp \
+		$(LDFLAGS) && ./test_config $(CONFIG_DIR)/cluster.conf && rm -f test_config
 
 clean:
-	rm src/isocline.o
-	rm -f server/server client/client
-	rm -rf servidor/server
-	rm -rf cliente1/client
-	rm -rf cliente2/client
+	rm -f $(CLIENT_OBJECTS) $(SERVER_OBJECTS) $(COMMON_OBJECTS) $(ISOCLINE_OBJ)
+	rm -f $(CLIENT_TARGET) $(SERVER_TARGET)
+	rm -rf sync_dir_* files/
+	rm -f test_config
+
+install: all
+	@echo "File Synchronization System built successfully!"
+	@echo "Client: $(CLIENT_TARGET)"
+	@echo "Server: $(SERVER_TARGET)"
+	@echo "Config: $(CONFIG_DIR)/cluster.conf"
+
+help:
+	@echo "Available targets:"
+	@echo "  all         - Build both client and server"
+	@echo "  client      - Build only client"
+	@echo "  server      - Build only server"
+	@echo "  test-config - Test cluster configuration loading"
+	@echo "  clean       - Remove all build files and sync directories"
+	@echo "  install     - Build and show installation info"
+	@echo "  help        - Show this help message"

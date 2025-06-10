@@ -1,4 +1,4 @@
-#include "sync.h"
+#include "sync_client.h"
 #include "commands.h"
 #include <cstdio>
 #include <cstdlib>
@@ -11,10 +11,10 @@
 
 using namespace std;
 
-// Function declarations from client_interface.cpp
+// Function declarations
 void print_help();
 vector<string> split_command(const string& str);
-bool process_command(const string& command);
+bool process_command(const string& command, SyncClient& client);
 
 // List of available commands for autocompletion
 const vector<string> commands = {
@@ -31,7 +31,7 @@ const vector<string> commands = {
 // Custom completer function
 static void word_completer(ic_completion_env_t* cenv, const char* word) {
     for (const auto& cmd : commands) {
-        if (cmd.find(word) == 0) { // Suggest commands that start with the input
+        if (cmd.find(word) == 0) {
             ic_add_completion(cenv, cmd.c_str());
         }
     }
@@ -39,10 +39,7 @@ static void word_completer(ic_completion_env_t* cenv, const char* word) {
 
 // Main completer function
 static void completer(ic_completion_env_t* cenv, const char* input) {
-    // Complete file names (optional, can be removed if not needed)
     ic_complete_filename(cenv, input, 0, ".", NULL);
-
-    // Use custom word completer
     ic_complete_word(cenv, input, &word_completer, NULL);
 }
 
@@ -115,47 +112,148 @@ int main(int argc, char* argv[]) {
     }
     if (port == 0) ask_port();
 
-    const char* username_c = username.c_str();
-    const char* server_ip_c = server_ip.c_str();
-
     std::cout << "Conectando como '" << username << "' em " << server_ip << ":" << port << "..." << std::endl;
 
-    // Start synchronization in background; if it fails, exit.
-    if (!sync_start(username_c, server_ip_c, port)) {
-        std::cerr << "Não foi possível iniciar a sincronização. Verifique se o servidor está online e tente novamente." << std::endl;
+    // Create and connect sync client
+    SyncClient client;
+    Result connectResult = client.connect(username, server_ip, port);
+    if (!connectResult.success()) {
+        std::cerr << "Não foi possível conectar ao servidor: " << connectResult.getMessage() << std::endl;
         return 1;
     }
 
     // Configure Isocline
-    ic_set_history(NULL, -1 /* default entries (= 200) */);
-    ic_set_default_completer(&completer, NULL); // Set autocompletion callback
-    ic_enable_auto_tab(true); // Automatically complete if there's only one match
+    ic_set_history(NULL, -1);
+    ic_set_default_completer(&completer, NULL);
+    ic_enable_auto_tab(true);
 
     // Print help information
     print_help();
 
     // Command loop
-    while (true) {
-        // Use Isocline to get input with a prompt
+    while (client.isConnected()) {
         char* input = ic_readline("");
         if (!input) {
-            break; // Exit on EOF (Ctrl+D)
+            break; // EOF (Ctrl+D)
         }
 
         string command(input);
-        free(input); // Free memory allocated by Isocline
+        free(input);
 
-        // Add the command to history if it's not empty
         if (!command.empty()) {
             ic_history_add(command.c_str());
         }
 
-        // Process the command
-        if (!process_command(command)) {
-            break; // Exit command loop
+        if (!process_command(command, client)) {
+            break; // Exit command
         }
     }
 
     ic_println("Sessão encerrada.");
     return 0;
+}
+
+// Function to split a string into tokens
+std::vector<std::string> split_command(const std::string& str) {
+    std::vector<std::string> tokens;
+    std::istringstream iss(str);
+    std::string token;
+
+    while (iss >> token) {
+        tokens.push_back(token);
+    }
+
+    return tokens;
+}
+
+// Print help information
+void print_help() {
+    std::cout << "Comandos disponíveis:" << std::endl;
+    std::cout << "  " << CMD_UPLOAD << " <path/filename.ext> - Envia um arquivo para o servidor" << std::endl;
+    std::cout << "  " << CMD_DOWNLOAD << " <filename.ext> - Baixa um arquivo do servidor para o diretório local" << std::endl;
+    std::cout << "  " << CMD_DELETE << " <filename.ext> - Remove um arquivo do diretório de sincronização" << std::endl;
+    std::cout << "  " << CMD_LIST_SERVER << " - Lista os arquivos no servidor" << std::endl;
+    std::cout << "  " << CMD_LIST_CLIENT << " - Lista os arquivos no diretório de sincronização local" << std::endl;
+    std::cout << "  " << CMD_GET_SYNC_DIR << " - Inicializa o diretório de sincronização" << std::endl;
+    std::cout << "  " << CMD_EXIT << " - Encerra a sessão com o servidor" << std::endl;
+    std::cout << "  " << CMD_HELP << " - Exibe esta ajuda" << std::endl;
+}
+
+// Process a single command
+bool process_command(const std::string& command, SyncClient& client) {
+    if (command.empty()) {
+        return true;
+    }
+
+    std::vector<std::string> tokens = split_command(command);
+    if (tokens.empty()) {
+        return true;
+    }
+
+    std::string cmd = tokens[0];
+
+    if (cmd == CMD_EXIT) {
+        client.disconnect();
+        return false; // Exit command loop
+    }
+    else if (cmd == CMD_UPLOAD) {
+        if (tokens.size() < 2) {
+            std::cout << "Uso: " << CMD_UPLOAD << " <path/filename.ext>" << std::endl;
+            return true;
+        }
+        
+        Result result = client.uploadFile(tokens[1]);
+        if (!result.success()) {
+            std::cout << "Erro no upload: " << result.getMessage() << std::endl;
+        }
+    }
+    else if (cmd == CMD_DOWNLOAD) {
+        if (tokens.size() < 2) {
+            std::cout << "Uso: " << CMD_DOWNLOAD << " <filename.ext>" << std::endl;
+            return true;
+        }
+        
+        Result result = client.downloadFile(tokens[1]);
+        if (!result.success()) {
+            std::cout << "Erro no download: " << result.getMessage() << std::endl;
+        }
+    }
+    else if (cmd == CMD_DELETE) {
+        if (tokens.size() < 2) {
+            std::cout << "Uso: " << CMD_DELETE << " <filename.ext>" << std::endl;
+            return true;
+        }
+        
+        Result result = client.deleteFile(tokens[1]);
+        if (!result.success()) {
+            std::cout << "Erro ao deletar: " << result.getMessage() << std::endl;
+        }
+    }
+    else if (cmd == CMD_LIST_SERVER) {
+        Result result = client.listServerFiles();
+        if (!result.success()) {
+            std::cout << "Erro ao listar arquivos do servidor: " << result.getMessage() << std::endl;
+        }
+    }
+    else if (cmd == CMD_LIST_CLIENT) {
+        Result result = client.listClientFiles();
+        if (!result.success()) {
+            std::cout << "Erro ao listar arquivos locais: " << result.getMessage() << std::endl;
+        }
+    }
+    else if (cmd == CMD_GET_SYNC_DIR) {
+        Result result = client.getSyncDir();
+        if (!result.success()) {
+            std::cout << "Erro ao sincronizar diretório: " << result.getMessage() << std::endl;
+        }
+    }
+    else if (cmd == CMD_HELP) {
+        print_help();
+    }
+    else {
+        std::cout << "Comando desconhecido: " << cmd << std::endl;
+        print_help();
+    }
+
+    return true; // Continue command loop
 }
