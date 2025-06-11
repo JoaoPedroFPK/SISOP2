@@ -22,6 +22,21 @@ Result ReplicationProtocol::receiveHeartbeat(int sockfd, ServerInfo& serverInfo,
 }
 
 // Replication methods
+Result ReplicationProtocol::sendReplicateFile(int sockfd, uint64_t operationId, const std::string& filename, const std::vector<uint8_t>& data) {
+    std::stringstream ss;
+    ss << operationId << "|" << static_cast<int>(OperationType::FILE_UPLOAD) << "|"
+       << "system" << "|" << filename;
+    return sendCommand(sockfd, Command::REPLICATE_FILE, ss.str(), data);
+}
+
+Result ReplicationProtocol::sendConfirmOperation(int sockfd, uint64_t operationId) {
+    return sendCommand(sockfd, Command::CONFIRM_OPERATION, std::to_string(operationId));
+}
+
+Result ReplicationProtocol::sendRequestState(int sockfd, uint64_t lastOperationId) {
+    return sendCommand(sockfd, Command::REQUEST_STATE, std::to_string(lastOperationId));
+}
+
 Result ReplicationProtocol::sendReplicationOperation(int sockfd, const ReplicationOperation& operation) {
     std::string payload = serializeReplicationOperation(operation);
     return sendCommand(sockfd, Command::REPLICATE_FILE, payload, operation.fileData);

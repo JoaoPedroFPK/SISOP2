@@ -11,25 +11,36 @@
 class SyncServer {
 public:
     SyncServer();
-    ~SyncServer();
+    virtual ~SyncServer();
     
-    void run(int port);
-    void stop();
+    // Public interface for derived classes
+    bool initialize(int port);
+    virtual void start();
+    virtual void run(int port);
+    virtual void stop();
     
-private:
+    // Public command handlers for replication
+    virtual Result handleUpload(const std::string& username, const std::string& filename, 
+                               const std::vector<uint8_t>& data);
+    virtual Result handleDelete(const std::string& username, const std::string& filename);
+    virtual Result handleClientCommand(const Message& msg);
+    
+protected:
     SyncProtocol protocol;
     FileManager fileManager;
     ClientManager clientManager;
     std::atomic<bool> running;
     int serverSocket;
+    int serverPort;
     
     void handleClient(int clientSocket);
     void processCommand(int sockfd, const std::string& username, const Message& msg);
     
-    // Command handlers
-    Result handleUpload(int sockfd, const std::string& username, const Message& msg);
+private:
+    // Internal command handlers
+    Result handleUploadInternal(int sockfd, const std::string& username, const Message& msg);
     Result handleDownload(int sockfd, const std::string& username, const Message& msg);
-    Result handleDelete(int sockfd, const std::string& username, const Message& msg);
+    Result handleDeleteInternal(int sockfd, const std::string& username, const Message& msg);
     Result handleListServer(int sockfd, const std::string& username);
     Result handleGetSyncDir(int sockfd, const std::string& username);
     

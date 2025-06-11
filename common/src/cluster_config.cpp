@@ -301,4 +301,38 @@ bool createDefaultConfigFile(const std::string& filename, int numServers) {
     
     std::cout << "Created default configuration file: " << filename << std::endl;
     return true;
-} 
+}
+
+#ifdef TEST_CONFIG
+int main(int argc, char* argv[]) {
+    if (argc != 2) {
+        std::cerr << "Usage: " << argv[0] << " <config_file>" << std::endl;
+        return 1;
+    }
+    
+    std::cout << "Testing cluster configuration loading..." << std::endl;
+    
+    ClusterConfigManager configManager;
+    if (!configManager.loadConfig(argv[1])) {
+        std::cerr << "Failed to load configuration from " << argv[1] << std::endl;
+        return 1;
+    }
+    
+    const ClusterConfig& config = configManager.getConfig();
+    
+    std::cout << "Configuration loaded successfully!" << std::endl;
+    std::cout << "Total servers: " << config.totalServers << std::endl;
+    std::cout << "Replication factor: " << config.replicationFactor << std::endl;
+    std::cout << "Frontend: " << config.frontEndAddress << ":" << config.frontEndPort << std::endl;
+    
+    std::cout << "Servers:" << std::endl;
+    for (const auto& server : config.servers) {
+        std::cout << "  Server " << server.serverId << ": " 
+                  << server.address << ":" << server.port 
+                  << " (priority: " << server.priority << ")" << std::endl;
+    }
+    
+    std::cout << "Configuration test passed!" << std::endl;
+    return 0;
+}
+#endif 

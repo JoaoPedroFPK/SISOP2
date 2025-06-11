@@ -2,6 +2,7 @@
 #define REPLICATION_PROTOCOL_H
 
 #include "sync_protocol.h"
+#include "operation_types.h"  // Include for OperationType
 #include <chrono>
 #include <map>
 #include <vector>
@@ -23,16 +24,7 @@ struct ServerInfo {
     }
 };
 
-// Operation types for replication
-enum class OperationType {
-    FILE_UPLOAD,
-    FILE_DELETE,
-    USER_LOGIN,
-    USER_LOGOUT,
-    STATE_SYNC
-};
-
-// Replication operation structure
+// Replication operation structure (uses OperationType from operation_log.h)
 struct ReplicationOperation {
     uint64_t operationId;
     OperationType type;
@@ -66,6 +58,20 @@ struct ElectionMessage {
         : type(t), senderId(id), candidateId(-1), priority(prio) {}
 };
 
+// Replication message for backup server communication
+struct ReplicationMessage {
+    uint64_t operationId;
+    OperationType type;
+    std::string filename;
+    std::string username;
+    std::vector<uint8_t> data;
+    std::chrono::time_point<std::chrono::steady_clock> timestamp;
+    
+    ReplicationMessage() : operationId(0), type(OperationType::FILE_UPLOAD) {
+        timestamp = std::chrono::steady_clock::now();
+    }
+};
+
 // Enhanced replication protocol class
 class ReplicationProtocol : public SyncProtocol {
 public:
@@ -76,12 +82,15 @@ public:
     Result receiveHeartbeat(int sockfd, ServerInfo& serverInfo, uint32_t timeout_ms = 2000);
     
     // Replication methods
+    Result sendReplicateFile(int sockfd, uint64_t operationId, const std::string& filename, const std::vector<uint8_t>& data);
     Result sendReplicationOperation(int sockfd, const ReplicationOperation& operation);
     Result receiveReplicationOperation(int sockfd, ReplicationOperation& operation, uint32_t timeout_ms = 5000);
+    Result sendConfirmOperation(int sockfd, uint64_t operationId);
     Result sendOperationConfirmation(int sockfd, uint64_t operationId, bool success);
     Result receiveOperationConfirmation(int sockfd, uint64_t& operationId, bool& success, uint32_t timeout_ms = 5000);
     
     // State synchronization
+    Result sendRequestState(int sockfd, uint64_t lastOperationId);
     Result sendStateRequest(int sockfd, const std::string& username);
     Result receiveStateRequest(int sockfd, std::string& username, uint32_t timeout_ms = 5000);
     Result sendStateData(int sockfd, const std::vector<std::string>& fileList);

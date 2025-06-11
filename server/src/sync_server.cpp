@@ -6,13 +6,33 @@
 #include <thread>
 #include <unistd.h>
 
-SyncServer::SyncServer() : running(false), serverSocket(-1) {}
+SyncServer::SyncServer() : running(false), serverSocket(-1), serverPort(0) {}
 
 SyncServer::~SyncServer() {
     stop();
 }
 
+bool SyncServer::initialize(int port) {
+    serverPort = port;
+    return true;
+}
+
+void SyncServer::start() {
+    // Default implementation does nothing - derived classes can override
+}
+
 void SyncServer::run(int port) {
+    if (port > 0) {
+        serverPort = port;
+    }
+    
+    if (!initialize(serverPort)) {
+        std::cerr << "Failed to initialize server" << std::endl;
+        return;
+    }
+    
+    start();
+    
     running.store(true);
     
     serverSocket = create_socket();
@@ -21,8 +41,8 @@ void SyncServer::run(int port) {
         return;
     }
     
-    if (bind_socket(serverSocket, port) < 0) {
-        std::cerr << "Falha ao fazer bind do socket na porta " << port << std::endl;
+    if (bind_socket(serverSocket, serverPort) < 0) {
+        std::cerr << "Falha ao fazer bind do socket na porta " << serverPort << std::endl;
         close(serverSocket);
         return;
     }
@@ -33,7 +53,7 @@ void SyncServer::run(int port) {
         return;
     }
     
-    printf("Servidor rodando na porta %d...\n", port);
+    printf("Servidor rodando na porta %d...\n", serverPort);
     
     while (running.load()) {
         int clientSocket = accept_connection(serverSocket);
@@ -140,13 +160,13 @@ void SyncServer::processCommand(int sockfd, const std::string& username, const M
     
     switch (msg.command) {
         case Command::UPLOAD:
-            result = handleUpload(sockfd, username, msg);
+            result = handleUploadInternal(sockfd, username, msg);
             break;
         case Command::DOWNLOAD:
             result = handleDownload(sockfd, username, msg);
             break;
         case Command::DELETE:
-            result = handleDelete(sockfd, username, msg);
+            result = handleDeleteInternal(sockfd, username, msg);
             break;
         case Command::LIST_SERVER:
             result = handleListServer(sockfd, username);
@@ -165,7 +185,7 @@ void SyncServer::processCommand(int sockfd, const std::string& username, const M
     }
 }
 
-Result SyncServer::handleUpload(int sockfd, const std::string& username, const Message& msg) {
+Result SyncServer::handleUploadInternal(int sockfd, const std::string& username, const Message& msg) {
     std::string filename = msg.payload;
     printf("Recebendo upload de %s: %s\n", username.c_str(), filename.c_str());
     
@@ -247,7 +267,7 @@ Result SyncServer::handleDownload(int sockfd, const std::string& username, const
     return sendFileData(sockfd, fileData);
 }
 
-Result SyncServer::handleDelete(int sockfd, const std::string& username, const Message& msg) {
+Result SyncServer::handleDeleteInternal(int sockfd, const std::string& username, const Message& msg) {
     std::string filename = msg.payload;
     printf("Deletando arquivo de %s: %s\n", username.c_str(), filename.c_str());
     
@@ -392,4 +412,40 @@ std::string SyncServer::formatFileList(const std::vector<FileInfo>& files) {
 void run_server(int port) {
     SyncServer server;
     server.run(port);
+}
+
+// Public command handlers for replication
+Result SyncServer::handleUpload(const std::string& username, const std::string& filename, 
+                               const std::vector<uint8_t>& data) {
+    // Initialize user directory if needed
+    fileManager.initUserDirectory(username);
+    
+    // Save file using file manager
+    bool saveSuccess = fileManager.saveFile(username, filename, 
+                                           reinterpret_cast<const char*>(data.data()), 
+                                           data.size());
+    
+    if (saveSuccess) {
+        printf("Uploaded file %s for user %s (%zu bytes)\n", 
+               filename.c_str(), username.c_str(), data.size());
+        return Result(SyncError::SUCCESS);
+    } else {
+        return Result(SyncError::PERMISSION_DENIED, "Failed to save file");
+    }
+}
+
+Result SyncServer::handleDelete(const std::string& username, const std::string& filename) {
+    bool deleteSuccess = fileManager.deleteFile(username, filename);
+    
+    if (deleteSuccess) {
+        printf("Deleted file %s for user %s\n", filename.c_str(), username.c_str());
+        return Result(SyncError::SUCCESS);
+    } else {
+        return Result(SyncError::FILE_NOT_FOUND, "File not found or delete failed");
+    }
+}
+
+Result SyncServer::handleClientCommand(const Message& /*msg*/) {
+    // Default implementation - derived classes can override
+    return Result(SyncError::SUCCESS);
 } 
