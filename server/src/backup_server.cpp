@@ -4,6 +4,7 @@
 #include <fstream>
 #include <sstream>
 #include <unistd.h>
+#include "cluster_manager.h"
 
 BackupServer::BackupServer() 
     : SyncServer(), primarySocket(-1), connectedToPrimary(false), 
@@ -288,6 +289,11 @@ void BackupServer::maintainPrimaryConnection() {
 void BackupServer::handlePrimaryDisconnection() {
     std::cout << "Primary connection lost, attempting to reconnect..." << std::endl;
     disconnectFromPrimary();
+
+    // Inform cluster manager about primary failure to trigger election
+    if (clusterManagerPtr) {
+        clusterManagerPtr->updateServerStatus(primaryServer.serverId, false);
+    }
 }
 
 void BackupServer::processIncomingReplication() {

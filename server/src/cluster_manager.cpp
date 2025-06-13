@@ -1,4 +1,5 @@
 #include "cluster_manager.h"
+#include "election_manager.h"
 #include "socket_utils.h"
 #include <iostream>
 #include <algorithm>
@@ -9,9 +10,13 @@
 
 ClusterManager::ClusterManager() 
     : thisServerId(-1), currentPrimaryId(-1), isRunning(false), shouldStop(false),
-      heartbeatInterval(2000), failureTimeout(5000) {}
+      heartbeatInterval(2000), failureTimeout(5000), electionManager(nullptr) {}
 
 ClusterManager::~ClusterManager() {
+    if (electionManager) {
+        delete electionManager;
+        electionManager = nullptr;
+    }
     stop();
 }
 
@@ -33,8 +38,13 @@ bool ClusterManager::initialize(const ClusterConfig& config, int serverId) {
     if (primaryIt != serverCluster.end()) {
         currentPrimaryId = primaryIt->serverId;
     } else {
-        // No primary configured, elect one based on priority
-        electNewPrimary();
+        // No primary configured, will be determined by election manager below
+        currentPrimaryId = -1;
+    }
+    
+    // Instantiate election manager after we have cluster info
+    if (!electionManager) {
+        electionManager = new ElectionManager(this);
     }
     
     std::cout << "ClusterManager initialized for server " << thisServerId 
@@ -132,8 +142,10 @@ bool ClusterManager::updateServerStatus(int serverId, bool isActive) {
     server->lastHeartbeat = std::chrono::steady_clock::now();
     
     if (!isActive && serverId == currentPrimaryId) {
-        // Primary failed, need to elect new one
-        electNewPrimary();
+        // Primary failed, trigger leader election using bully algorithm
+        if (electionManager) {
+            electionManager->startElection();
+        }
     }
     
     return true;
@@ -272,8 +284,10 @@ void ClusterManager::handleServerFailure(int serverId) {
     disconnectFromServer(serverId);
     
     if (serverId == currentPrimaryId) {
-        std::cout << "Primary server failed, electing new primary" << std::endl;
-        electNewPrimary();
+        std::cout << "Primary server failed, trigger leader election using bully algorithm" << std::endl;
+        if (electionManager) {
+            electionManager->startElection();
+        }
     }
 }
 
@@ -312,35 +326,6 @@ ServerInfo* ClusterManager::findServerById(int serverId) {
     return (it != serverCluster.end()) ? &(*it) : nullptr;
 }
 
-void ClusterManager::electNewPrimary() {
-    // Simple election: choose server with highest priority among active servers
-    ServerInfo* newPrimary = nullptr;
-    int highestPriority = -1;
-    
-    for (auto& server : serverCluster) {
-        if (server.isActive && server.priority > highestPriority) {
-            highestPriority = server.priority;
-            newPrimary = &server;
-        }
-    }
-    
-    if (newPrimary) {
-        // Demote current primary
-        if (currentPrimaryId != -1) {
-            ServerInfo* currentPrimary = findServerById(currentPrimaryId);
-            if (currentPrimary) {
-                currentPrimary->isPrimary = false;
-            }
-        }
-        
-        // Promote new primary
-        newPrimary->isPrimary = true;
-        currentPrimaryId = newPrimary->serverId;
-        
-        std::cout << "Elected server " << newPrimary->serverId << " as new primary" << std::endl;
-    }
-}
-
 void ClusterManager::registerWithFrontEnd(const std::string& frontEndAddress, int frontEndPort) {
     int sockfd = create_client_socket(frontEndAddress, frontEndPort);
     if (sockfd >= 0) {
@@ -362,5 +347,12 @@ void ClusterManager::notifyPrimaryChange(int newPrimaryId) {
             std::cout << "Notified front-end about primary change to server " << newPrimaryId << std::endl;
         }
         close(sockfd);
+    }
+}
+
+// Fallback wrapper: delegates to ElectionManager which runs the Bully algorithm
+void ClusterManager::electNewPrimary() {
+    if (electionManager) {
+        electionManager->startElection();
     }
 } 

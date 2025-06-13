@@ -1,9 +1,11 @@
 #include "backup_server.h"
 #include "cluster_config.h"
+#include "cluster_manager.h"
 #include <iostream>
 #include <signal.h>
 
 BackupServer* backupServer = nullptr;
+ClusterManager* clusterMgr = nullptr;
 
 void signalHandler(int signal) {
     if (backupServer) {
@@ -54,8 +56,17 @@ int main(int argc, char* argv[]) {
         return 1;
     }
     
+    // Create cluster manager and initialize
+    clusterMgr = new ClusterManager();
+    if (!clusterMgr->initialize(configManager.getConfig(), serverId)) {
+        std::cerr << "Failed to initialize cluster manager" << std::endl;
+        return 1;
+    }
+    clusterMgr->start();
+
     // Create and initialize backup server
     backupServer = new BackupServer();
+    backupServer->setClusterManager(clusterMgr);
     
     if (!backupServer->initializeAsBackup(configManager.getConfig(), serverId)) {
         std::cerr << "Failed to initialize backup server" << std::endl;
@@ -98,5 +109,9 @@ int main(int argc, char* argv[]) {
     std::cout << "Backup server stopped" << std::endl;
     
     delete backupServer;
+    if (clusterMgr) {
+        clusterMgr->stop();
+        delete clusterMgr;
+    }
     return 0;
 } 

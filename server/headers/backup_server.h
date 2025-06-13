@@ -9,6 +9,8 @@
 #include <atomic>
 #include <queue>
 
+class ClusterManager;  // forward declaration
+
 class BackupServer : public SyncServer {
 public:
     BackupServer();
@@ -35,6 +37,8 @@ public:
     // Backup-specific operations
     void sendConfirmationToPrimary(uint64_t operationId);
     void requestStateSynchronization();
+    
+    void setClusterManager(ClusterManager* cm) { clusterManagerPtr = cm; }
     
 protected:
     // State management
@@ -95,6 +99,9 @@ private:
     // Helper methods
     bool isValidReplicationMessage(const ReplicationMessage& msg) const;
     void logReplicationActivity(const std::string& activity);
+    
+    // Cluster management
+    ClusterManager* clusterManagerPtr = nullptr;
 };
 
 #endif // BACKUP_SERVER_H 

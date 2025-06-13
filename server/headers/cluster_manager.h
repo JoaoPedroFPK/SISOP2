@@ -10,6 +10,9 @@
 #include <atomic>
 #include <chrono>
 
+// Forward declaration to avoid circular dependency
+class ElectionManager;
+
 class ClusterManager {
 public:
     ClusterManager();
@@ -26,6 +29,7 @@ public:
     std::vector<ServerInfo> getBackupServers() const;
     bool isPrimary() const;
     int getCurrentPrimaryId() const;
+    int getThisServerId() const { return thisServerId; }
     
     // Server status management
     bool updateServerStatus(int serverId, bool isActive);
@@ -52,6 +56,9 @@ private:
     int thisServerId;
     int currentPrimaryId;
     bool isRunning;
+    
+    // Election management
+    ElectionManager* electionManager;
     
     // Communication
     ReplicationProtocol replicationProtocol;

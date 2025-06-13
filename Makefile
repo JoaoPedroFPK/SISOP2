@@ -37,19 +37,22 @@ CLIENT_OBJECTS = $(CLIENT_SOURCES:.cpp=.o)
 # Server sources - now includes cluster manager and replication components
 SERVER_SOURCES = $(SERVER_DIR)/src/server.cpp $(SERVER_DIR)/src/sync_server.cpp \
                  $(SERVER_DIR)/src/file_manager.cpp $(SERVER_DIR)/src/client_manager.cpp \
-                 $(SERVER_DIR)/src/cluster_manager.cpp $(SERVER_DIR)/src/operation_log.cpp
+                 $(SERVER_DIR)/src/cluster_manager.cpp $(SERVER_DIR)/src/operation_log.cpp \
+                 $(SERVER_DIR)/src/election_manager.cpp
 SERVER_OBJECTS = $(SERVER_SOURCES:.cpp=.o)
 
 # Primary server sources - extends server with replication
 PRIMARY_SOURCES = $(SERVER_DIR)/src/primary_main.cpp $(SERVER_DIR)/src/primary_server.cpp $(SERVER_DIR)/src/sync_server.cpp \
                   $(SERVER_DIR)/src/file_manager.cpp $(SERVER_DIR)/src/client_manager.cpp \
-                  $(SERVER_DIR)/src/cluster_manager.cpp $(SERVER_DIR)/src/operation_log.cpp
+                  $(SERVER_DIR)/src/cluster_manager.cpp $(SERVER_DIR)/src/operation_log.cpp \
+                  $(SERVER_DIR)/src/election_manager.cpp
 PRIMARY_OBJECTS = $(PRIMARY_SOURCES:.cpp=.o)
 
 # Backup server sources
 BACKUP_SOURCES = $(SERVER_DIR)/src/backup_main.cpp $(SERVER_DIR)/src/backup_server.cpp $(SERVER_DIR)/src/sync_server.cpp \
                  $(SERVER_DIR)/src/file_manager.cpp $(SERVER_DIR)/src/client_manager.cpp \
-                 $(SERVER_DIR)/src/operation_log.cpp
+                 $(SERVER_DIR)/src/cluster_manager.cpp $(SERVER_DIR)/src/operation_log.cpp \
+                 $(SERVER_DIR)/src/election_manager.cpp
 BACKUP_OBJECTS = $(BACKUP_SOURCES:.cpp=.o)
 
 # Frontend sources

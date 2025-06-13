@@ -1,14 +1,19 @@
 #include "primary_server.h"
 #include "cluster_config.h"
+#include "cluster_manager.h"
 #include <iostream>
 #include <signal.h>
 
 PrimaryServer* primaryServer = nullptr;
+ClusterManager* clusterMgr = nullptr;
 
 void signalHandler(int signal) {
     if (primaryServer) {
         std::cout << "\nReceived signal " << signal << ", shutting down..." << std::endl;
         primaryServer->stop();
+    }
+    if (clusterMgr) {
+        clusterMgr->stop();
     }
 }
 
@@ -50,6 +55,14 @@ int main(int argc, char* argv[]) {
         return 1;
     }
     
+    // Create cluster manager and initialize
+    clusterMgr = new ClusterManager();
+    if (!clusterMgr->initialize(configManager.getConfig(), serverId)) {
+        std::cerr << "Failed to initialize cluster manager" << std::endl;
+        return 1;
+    }
+    clusterMgr->start();
+
     // Create and initialize primary server
     primaryServer = new PrimaryServer();
     
@@ -75,5 +88,9 @@ int main(int argc, char* argv[]) {
     std::cout << "Primary server stopped" << std::endl;
     
     delete primaryServer;
+    if (clusterMgr) {
+        clusterMgr->stop();
+        delete clusterMgr;
+    }
     return 0;
 } 
