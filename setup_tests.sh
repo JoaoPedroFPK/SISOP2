@@ -1,11 +1,17 @@
-mkdir -p servidor
-mkdir -p cliente1
-mkdir -p cliente2
+mkdir -p test_servidor1
+mkdir -p test_servidor2
+mkdir -p test_cliente1
+mkdir -p test_cliente2
+mkdir -p test_frontend
 
-rm -r cliente1/*
-rm -r cliente2/*
-rm -r servidor/*
+rm -r test_cliente1/*
+rm -r test_cliente2/*
+rm -r test_servidor1/*
+rm -r test_servidor2/*
+rm -r test_frontend/*
 
-cp server/server servidor/
-cp client/client cliente1/
-cp client/client cliente2/
+cp server/primary_server test_servidor1/
+cp server/backup_server test_servidor2/
+cp client/client test_cliente1/
+cp client/client test_cliente2/
+cp frontend/frontend test_frontend/
