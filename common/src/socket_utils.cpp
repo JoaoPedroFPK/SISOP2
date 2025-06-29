@@ -90,7 +90,7 @@ size_t read_all(int sockfd, void* buf, size_t len) {
         int select_result = select(sockfd + 1, &readfds, NULL, NULL, &tv);
         if (select_result <= 0) {
             if (select_result == 0) {
-                DEBUG_PRINTF("DEBUG Socket: Read timeout after reading %zu bytes\n", total_read);
+                // DEBUG_PRINTF("DEBUG Socket: Read timeout after reading %zu bytes\n", total_read);
             } else {
                 DEBUG_PRINTF("DEBUG Socket: Select error: %s\n", strerror(errno));
             }
@@ -114,4 +114,34 @@ size_t read_all(int sockfd, void* buf, size_t len) {
     }
 
     return total_read;
+}
+
+// Higher-level helper functions
+int create_client_socket(const std::string& address, int port) {
+    int sockfd = create_socket();
+    if (sockfd < 0) return -1;
+    
+    if (connect_socket(sockfd, address.c_str(), port) < 0) {
+        close(sockfd);
+        return -1;
+    }
+    
+    return sockfd;
+}
+
+int create_server_socket(int port) {
+    int sockfd = create_socket();
+    if (sockfd < 0) return -1;
+    
+    if (bind_socket(sockfd, port) < 0) {
+        close(sockfd);
+        return -1;
+    }
+    
+    if (listen_socket(sockfd) < 0) {
+        close(sockfd);
+        return -1;
+    }
+    
+    return sockfd;
 }

@@ -10,3 +10,9 @@ client/client
 .vscode/settings.json
 input-files/
 *.o
+0329.mov
+0330.mov
+aurelia.pdf
+servidor/server
+test_*
+frontend/frontend
