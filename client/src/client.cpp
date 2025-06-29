@@ -8,6 +8,7 @@
 #include <isocline.h> // Include Isocline
 #include <arpa/inet.h>
 #include <limits>
+#include <sstream> // Include sstream for string stream functionality
 
 using namespace std;
 
