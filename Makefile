@@ -62,7 +62,7 @@ FRONTEND_OBJECTS = $(FRONTEND_SOURCES:.cpp=.o)
 
 .PHONY: all clean client server frontend cluster primary backup replication test-replication
 
-all: client server frontend
+all: client server frontend replication
 
 client: $(CLIENT_TARGET)
 
