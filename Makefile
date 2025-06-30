@@ -10,6 +10,7 @@ CXXFLAGS = -std=c++17 -pthread -Wall -Wextra -Wpedantic -O0
 CCFLAGS  = -std=c11
 
 all: server client
+	mkdir -p servidor cliente1 cliente2 backup1 backup2
 	cp server/server servidor/
 	cp client/client cliente1/
 	cp client/client cliente2/
