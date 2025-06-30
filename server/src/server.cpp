@@ -1,39 +1,37 @@
 #include "connection_handler.h"
-#include <cstdio>
-#include <cstdlib>
+#include "replica_manager.h"
 #include <iostream>
-#include <limits>
+#include <cstdlib>
+#include <vector>
+#include <string>
+
+ReplicaConfig g_replica_config;
 
 int main(int argc, char* argv[]) {
-    auto ask_port = []() {
-        int p = 0;
-        while (true) {
-            std::cout << "Por favor, introduza a porta (1-65535): ";
-            if (!(std::cin >> p)) {
-                std::cin.clear();
-                std::cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
-                std::cout << "Valor inválido. Tente novamente." << std::endl;
-                continue;
-            }
-            if (p > 0 && p <= 65535) {
-                break;
-            }
-            std::cout << "Porta fora do intervalo permitido. Tente novamente." << std::endl;
-        }
-        return p;
-    };
-
-    int port = 0;
-    if (argc == 2) {
-        port = std::atoi(argv[1]);
-        if (port <= 0 || port > 65535) {
-            std::cout << "Porta fornecida inválida." << std::endl;
-            port = ask_port();
-        }
-    } else {
-        port = ask_port();
+    if (argc < 2) {
+        std::cout << "Uso:\n"
+                  << argv[0] << " primary <porta_primario> <ip_backup1> <porta_backup1> <ip_backup2> <porta_backup2>\n"
+                  << argv[0] << " backup <porta_backup> <ip_primario> <porta_primario>\n";
+        return 1;
     }
 
-    run_server(port);
+    std::string role = argv[1];
+    if (role == "primary" && argc == 7) {
+        g_replica_config.role = ReplicaRole::PRIMARY;
+        g_replica_config.listen_port = std::atoi(argv[2]);
+        g_replica_config.backup_ips = {argv[3], argv[5]};
+        g_replica_config.backup_ports = {std::atoi(argv[4]), std::atoi(argv[6])};
+    } else if (role == "backup" && argc == 5) {
+        g_replica_config.role = ReplicaRole::BACKUP;
+        g_replica_config.listen_port = std::atoi(argv[2]);
+        // Para o backup, o IP/porta do primário fica em backup_ips[0]/backup_ports[0]
+        g_replica_config.backup_ips = {argv[3]};
+        g_replica_config.backup_ports = {std::atoi(argv[4])};
+    } else {
+        std::cout << "Argumentos inválidos.\n";
+        return 1;
+    }
+
+    start_replica_manager(g_replica_config);
     return 0;
 }

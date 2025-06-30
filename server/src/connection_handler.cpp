@@ -18,9 +18,15 @@
 // #include <linux/tcp.h>
 #include <fcntl.h>
 #include <iostream>
+#include "replica_manager.h"
+#include <set>
+static std::set<int> backupSockets;
+static pthread_mutex_t backupSocketsMutex = PTHREAD_MUTEX_INITIALIZER;
+
 
 // Global FileManager instance
 static FileManager fileManager;
+extern ReplicaConfig g_replica_config;
 
 // Mutex for protecting concurrent access to shared resources
 static pthread_mutex_t fileMutex = PTHREAD_MUTEX_INITIALIZER;
@@ -73,15 +79,38 @@ void run_server(int port) {
 
     while (true) {
         int client_sockfd = accept_connection(sockfd);
-        pthread_t thread_id;
-        pthread_create(&thread_id, NULL, handle_client, (void*)(intptr_t)client_sockfd);
-        pthread_detach(thread_id);
+        if (client_sockfd < 0) {
+            perror("Erro ao aceitar conexão");
+            continue; // Continue to the next iteration if accept fails
+        }
+        else
+        {
+            pthread_t thread_id;
+            pthread_create(&thread_id, NULL, handle_client, (void*)(intptr_t)client_sockfd);
+            pthread_detach(thread_id);
+        }
     }
 }
 
 void* handle_client(void* arg) {
     int sockfd = (intptr_t)arg;
     printf("Cliente conectado!\n");
+
+    // Tenta ler handshake sem bloquear o fluxo do cliente
+    char handshake[7] = {0};
+    ssize_t handshake_bytes = recv(sockfd, handshake, 6, MSG_DONTWAIT | MSG_PEEK);
+
+    if (handshake_bytes == 6 && strncmp(handshake, "BACKUP", 6) == 0) {
+        // Consome os 6 bytes do handshake
+        recv(sockfd, handshake, 6, 0);
+        pthread_mutex_lock(&backupSocketsMutex);
+        backupSockets.insert(sockfd);
+        pthread_mutex_unlock(&backupSocketsMutex);
+        printf("Conexão de backup registrada (socket %d)\n", sockfd);
+        // Mantém a thread viva para manter a conexão aberta
+        while (true) sleep(60);
+        pthread_exit(NULL);
+    }
 
     // Configure the socket for proper data reception
     struct timeval timeout;
@@ -449,6 +478,38 @@ void process_command(int sockfd, packet& pkt) {
                 // Send success response
                 strcpy(response.payload, "OK");
                 response.length = 2;
+
+                // Antes de enviar para os backups:
+                std::string user_and_file = username + ":" + filename;
+                strncpy(pkt.payload, user_and_file.c_str(), sizeof(pkt.payload) - 1);
+                pkt.payload[sizeof(pkt.payload) - 1] = '\0';
+
+                if (g_replica_config.role == ReplicaRole::PRIMARY) {
+                // Recria os data_packets a partir do buffer fileData
+                std::vector<packet> data_packets;
+                size_t offset = 0;
+                int seqn = pkt.seqn;
+                while (offset < bytesRead) {
+                    packet dataPkt;
+                    dataPkt.type = DATA_PACKET;
+                    dataPkt.seqn = seqn;
+                    size_t chunk = std::min(sizeof(dataPkt.payload), bytesRead - offset);
+                    memcpy(dataPkt.payload, fileData + offset, chunk);
+                    dataPkt.length = chunk;
+                    data_packets.push_back(dataPkt);
+                    offset += chunk;
+                }
+
+                pthread_mutex_lock(&backupSocketsMutex);
+                for (int bSock : backupSockets) {
+                    write_all(bSock, &pkt, sizeof(packet));
+                    for (const auto& dpkt : data_packets) {
+                        write_all(bSock, &dpkt, sizeof(packet));
+                    }
+                }
+                pthread_mutex_unlock(&backupSocketsMutex);
+            }
+            
             } else {
                 strcpy(response.payload, "ERROR");
                 response.length = 5;
@@ -524,7 +585,7 @@ void process_command(int sockfd, packet& pkt) {
             uint16_t delete_seq = pkt.seqn;
 
             DEBUG_PRINTF("DEBUG Server: [DELETE] Command received for file: %s (seq: %d)\n",
-                  filename.c_str(), delete_seq);
+                filename.c_str(), delete_seq);
 
             // Prepare an isolated response packet
             packet delete_response;
@@ -544,6 +605,19 @@ void process_command(int sockfd, packet& pkt) {
                 DEBUG_PRINTF("DEBUG Server: [DELETE] File %s not found\n", filename.c_str());
             }
             pthread_mutex_unlock(&fileMutex);
+
+            // *** Propagação para os backups ***
+            if (success && g_replica_config.role == ReplicaRole::PRIMARY) {
+                std::string user_and_file = username + ":" + filename;
+                strncpy(pkt.payload, user_and_file.c_str(), sizeof(pkt.payload) - 1);
+                pkt.payload[sizeof(pkt.payload) - 1] = '\0';
+
+                pthread_mutex_lock(&backupSocketsMutex);
+                for (int bSock : backupSockets) {
+                    write_all(bSock, &pkt, sizeof(packet));
+                }
+                pthread_mutex_unlock(&backupSocketsMutex);
+            }
 
             // Set response based on operation result
             if (!exists) {
@@ -572,7 +646,7 @@ void process_command(int sockfd, packet& pkt) {
 
             // Verify the response packet is correct
             DEBUG_PRINTF("DEBUG Server: [DELETE] Prepared response packet: type=%d, seq=%d, payload='%s'\n",
-                  delete_response.type, delete_response.seqn, delete_response.payload);
+                delete_response.type, delete_response.seqn, delete_response.payload);
 
             // CRITICAL: Send response directly with exclusive lock
             pthread_mutex_lock(&fileMutex);  // Use file mutex to ensure exclusive socket access
@@ -583,7 +657,7 @@ void process_command(int sockfd, packet& pkt) {
                 DEBUG_PRINTF("DEBUG Server: [DELETE] Response sent successfully (%zd bytes)\n", bytes_sent);
             } else {
                 DEBUG_PRINTF("ERROR Server: [DELETE] Failed to send response (%zd bytes): %s\n",
-                       bytes_sent, strerror(errno));
+                    bytes_sent, strerror(errno));
             }
 
             break;
@@ -687,7 +761,7 @@ void process_command(int sockfd, packet& pkt) {
             for (const auto& file : files) {
                 packet infoPkt;
                 infoPkt.type = SYNC_NOTIFICATION;
-                infoPkt.seqn = 0;
+                infoPkt.seqn = pkt.seqn; // Use o mesmo seqn do comando CMD_GET_SYNC_DIR
                 infoPkt.total_size = file.size;
                 std::string payload = std::string("U:") + file.filename;
                 strncpy(infoPkt.payload, payload.c_str(), sizeof(infoPkt.payload) - 1);
