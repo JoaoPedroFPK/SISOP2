@@ -13,6 +13,8 @@ all: server client
 	cp server/server servidor/
 	cp client/client cliente1/
 	cp client/client cliente2/
+	cp server/server backup1/
+	cp server/server backup2/
 
 server:
 	g++ $(CXXFLAGS) -o server/server $(SERVER_SRC) $(INCLUDES)
@@ -26,6 +28,8 @@ src/isocline.o: $(CLIENT_C_SRC)
 clean:
 	rm src/isocline.o
 	rm -f server/server client/client
-	rm -rf servidor/server
-	rm -rf cliente1/client
-	rm -rf cliente2/client
+	rm -rf servidor/*
+	rm -rf cliente1/*
+	rm -rf cliente2/*
+	rm -rf backup1/*
+	rm -rf backup2/*
